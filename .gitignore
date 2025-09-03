@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.env/
+.venv/
+cnn_venv/
+
+# Jupyter notebook checkpoints
+*.ipynb_checkpoints/
+
+# Data & model files
+*.npy
+*.npz
+*.pkl
+*.h5
+*.ckpt
+
+# IDE/editor settings
+.vscode/
+.idea/
+
+# OS junk files
+.DS_Store
+Thumbs.db

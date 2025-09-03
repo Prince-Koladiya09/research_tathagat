@@ -1,0 +1,19 @@
+tensorflow>=2.12
+keras>=2.12
+numpy
+matplotlib
+pandas
+seaborn
+scikit-learn
+kagglehub
+pillow
+
+# Extras
+# For Grad-CAM visualization
+opencv-python>=4.8.0
+# For embeddings and dimensionality reduction
+umap-learn>=0.5.4
+plotly>=5.16.0
+# For LIME and SHAP Visualizations
+lime
+shap
