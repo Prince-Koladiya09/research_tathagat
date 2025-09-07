@@ -6,19 +6,17 @@ from cnn_base.loggers import Logger
 from copy import deepcopy
 from .get_model import get_model
 from cnn_base.config import CONFIG, OPTIMIZERS, LR_SCHEDULERS, get_custom_layers, get_model_path, def_callbacks
+from joblib import load, dump
 
-
-class Model(keras.Model) :
-    def __init__(self, name : str = "custom_model", update_config_kwargs : dict = None, **kwargs) :
+class Model(Keras_Model) :
+    def __init__(self, name : str = "custom_model", **kwargs) :
         super().__init__(name=name, **kwargs)
         self.base_model = None
-        self.model = None
-        self.outputs_layer = None
-        self.config = deepcopy(CONFIG)
-        if update_config_kwargs is not None :
-            self.config.update(update_config_kwargs)
-        self.logger = Logger()
-        self.callbacks = def_callbacks(self.logger)
+        self.model : Keras_Model = None
+        self.outputs_layer : tf.Tensor = None
+        self.config : dict = deepcopy(CONFIG)
+        self.logger : Logger = Logger()
+        self.callbacks : list = def_callbacks(self.logger)
         self.logger.info("CNN model initialized")
 
     @staticmethod
@@ -32,7 +30,7 @@ class Model(keras.Model) :
 
 
     # ---------------- Model Handling ----------------
-    def get_base_model(self, name : str) :
+    def get_base_model(self, name : str) -> 'Model' :
         """
         Used to get the base keras model, example resnet50
         Just give the name
@@ -47,8 +45,9 @@ class Model(keras.Model) :
             self.logger.info(f"Base model {name} loaded")
         except Exception as e :
             self.logger.error(f"Error loading base model {name} : {e}")
+        return self
 
-    def rebuild_model(self) -> None :
+    def rebuild_model(self) -> 'Model' :
         if self.base_model is None or self.outputs_layer is None :
             self.logger.error(f"Cannot rebuild model : {"base_model" if self.base_model is None else "outputs_layer"} missing")
             return
@@ -57,6 +56,7 @@ class Model(keras.Model) :
             self.logger.info("Model rebuilt successfully")
         except Exception as e :
             self.logger.error(f"Error rebuilding model : {e}")
+        return self
 
     def compile(self) -> None :
         """
@@ -114,6 +114,7 @@ class Model(keras.Model) :
             self.logger.info(f"Model compiled with Optimizer: {optimizer_name}")
         except Exception as e :
             self.logger.error(f"Error compiling model : {e}")
+        return self
 
     def summary(self) -> None :
         if self.model :
@@ -126,17 +127,30 @@ class Model(keras.Model) :
         return self.model(inputs, training=training)
 
     # ---------------- Saving & Fitting ----------------
-    def save(self, file_name : str = None) :
+    def save(self, file_names : tuple[str] = None) :
         """
+        file_names : (keras_model.keras, this_model.pkl)
         If you do not provide file name, it makes default one from config
         """
         try :
-            if file_name is None :
-                file_name = get_model_path(self.base_model.name)
-            super().save(file_name)
-            self.logger.info(f"Model saved as {file_name}")
+            if file_names is None :
+                file_names = get_model_path(self.base_model.name)
+            
+            self.logger.info(f"Models saved as {file_names}")
         except Exception as e :
             self.logger.error(f"Error saving model : {e}")
+
+    @staticmethod
+    def load(file_name : str = None) -> 'Model' :
+        """
+        file_names : this_model.pkl
+        """
+        try :
+            model = load(file_name)
+            print(f"Model loaded from {file_name}")
+            return model
+        except Exception as e :
+            print(f"Error loading model : {e}")
 
     def fit(self, train, val, epochs : int = None, batch_size : int = None, callbacks : list = None) :
         """
@@ -180,7 +194,7 @@ class Model(keras.Model) :
         return super().evaluate(data, batch_size=batch_size)
 
     # ----------------- Freeze / Unfreeze ----------------- #
-    def freeze_all(self) :
+    def freeze_all(self) -> 'Model' :
         try :
             for i, layer in enumerate(self.model.layers) :
                 try :
@@ -190,8 +204,9 @@ class Model(keras.Model) :
             self.logger.info("All layers frozen")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def freeze_early_N(self, N : int = None) :
+    def freeze_early_N(self, N : int = None) -> 'Model' :
         """
         If you do not provide N, it takes default from config
         """
@@ -206,8 +221,9 @@ class Model(keras.Model) :
             self.logger.info(f"Froze all layers after first {N}")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def freeze_upto_layer(self, layer_name : str = None) :
+    def freeze_upto_layer(self, layer_name : str = None) -> 'Model' :
         try :
             for i, layer in enumerate(self.model.layers) :
                 try :
@@ -219,8 +235,9 @@ class Model(keras.Model) :
             self.logger.info(f"Froze layers up to {layer_name}")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def unfreeze_later_N(self, N : int = None) :
+    def unfreeze_later_N(self, N : int = None) -> 'Model' :
         """
         If you do not provide N, it takes default from config
         """
@@ -235,8 +252,9 @@ class Model(keras.Model) :
             self.logger.info(f"Unfroze last {N} layers")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def unfreeze_after_layer(self, layer_name : str = None) :
+    def unfreeze_after_layer(self, layer_name : str = None) -> 'Model' :
         try :
             freeze = True
             for i, layer in enumerate(self.model.layers) :
@@ -249,8 +267,9 @@ class Model(keras.Model) :
             self.logger.info(f"Unfroze layers after {layer_name}")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def unfreeze_all(self) :
+    def unfreeze_all(self) -> 'Model' :
         try :
             for i, layer in enumerate(self.model.layers) :
                 try :
@@ -260,6 +279,7 @@ class Model(keras.Model) :
             self.logger.info("All layers unfrozen")
         except Exception as e :
             self.logger.error(e)
+        return self
 
     # ----------------- Add Layers ----------------- #
     def _add_custom_layers_after_a_layer(self, output : tf.Tensor, layers : list[keras.layers.Layer]) -> tf.Tensor :
@@ -271,7 +291,7 @@ class Model(keras.Model) :
             x = l(x)
         return x
 
-    def add_custom_layers(self, layers_list : list[keras.layers.Layer] = None) :
+    def add_custom_layers(self, layers_list : list[keras.layers.Layer] = None) -> 'Model' :
         """
         layers_list : list of keras.layers.Layer
                     If given, then adds these layer after layer_name
@@ -287,8 +307,9 @@ class Model(keras.Model) :
             self.logger.info("Added custom layers at the end")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def add_layers_in_between(self, layer_name : str, layers : list[keras.layers.Layer]) :
+    def add_layers_in_between(self, layer_name : str, layers : list[keras.layers.Layer]) -> 'Model' :
         """
         layers : list of keras.layers.Layer
                     If given, then adds these layer after layer_name
@@ -310,9 +331,10 @@ class Model(keras.Model) :
             self.logger.info(f"Added custom layers after {layer_name}")
         except Exception as e :
             self.logger.error(e)
+        return self
 
     # ----------------- Cut Layers ----------------- #
-    def cut_at_layer(self, layer_name : str) :
+    def cut_at_layer(self, layer_name : str) -> 'Model' :
         try :
             self.outputs_layer = self.model.get_layer(layer_name).output
 
@@ -320,8 +342,9 @@ class Model(keras.Model) :
             self.logger.info(f"Cut model at {layer_name}")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def cut_at_layer_and_add_custom_layers(self, layer_name : str, layers_list : list[keras.layers.Layer] = None) :
+    def cut_at_layer_and_add_custom_layers(self, layer_name : str, layers_list : list[keras.layers.Layer] = None) -> 'Model' :
         """
         layers_list : list of keras.layers.Layer
                     If given, then adds these layer after layer_name
@@ -339,9 +362,10 @@ class Model(keras.Model) :
             self.logger.info(f"Cut model at {layer_name} and added custom layers")
         except Exception as e :
             self.logger.error(e)
+        return self
 
     # ----------------- Remove Layers ----------------- #
-    def remove_last_layer(self) :
+    def remove_last_layer(self) -> 'Model' :
         try :
             last_second_layer = self.model.layers[-2]
             self.outputs_layer = last_second_layer.output
@@ -349,8 +373,9 @@ class Model(keras.Model) :
             self.logger.info("Removed last layer")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def remove_N_layers(self, N : int = None) :
+    def remove_N_layers(self, N : int = None) -> 'Model' :
         """
         If you do not provide N, it takes default from config
         """
@@ -361,8 +386,9 @@ class Model(keras.Model) :
             self.logger.info(f"Removed last {N} layers")
         except Exception as e :
             self.logger.error(e)
+        return self
 
-    def remove_layer_in_between(self, layer_name : str) :
+    def remove_layer_in_between(self, layer_name : str) -> 'Model' :
         try :
             target_layer = self.model.get_layer(layer_name)
             index = self.model.layers.index(target_layer)
@@ -372,3 +398,4 @@ class Model(keras.Model) :
             self.logger.info(f"Removed {layer_name} layer and reconnected network")
         except Exception as e :
             self.logger.error(e)
+        return self

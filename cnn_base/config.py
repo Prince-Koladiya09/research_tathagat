@@ -105,13 +105,14 @@ LR_SCHEDULERS = {
     }
 }
 
-def get_model_path(model_name: str, extension: str = ".keras") -> str:
+def get_model_path(model_name : str, extensions : tuple[str] = (".keras", "pkl")) -> str:
     """
     Returns a unique path to save a model, including timestamp.
     Ensures every saved model has a base model name (no defaults).
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return os.path.join(MODEL_DIR, f"{model_name}_{timestamp}{extension}")
+    name = os.path.join(MODEL_DIR, f"{model_name}_{timestamp}")
+    return tuple(os.path.join(name, extension) for extension in extensions)
 
 
 def def_callbacks(logger) -> list:
@@ -154,5 +155,5 @@ def get_custom_layers(num_classes : int) -> list :
     return [
         layers.GlobalAveragePooling2D(),
         layers.Dropout(0.3),
-        layers.Dense(DEFAULT_CONFIG["num_classes"], activation="softmax")
+        layers.Dense(CONFIG["num_classes"], activation="softmax")
     ]
