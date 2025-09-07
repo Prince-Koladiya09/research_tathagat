@@ -1,11 +1,18 @@
 import os
 from datetime import datetime
+from copy import deepcopy
+
 from keras import layers
 
 from keras.optimizers import (
     Adam, AdamW, Nadam, Adagrad, Adamax, Adadelta,
     SGD, RMSprop,
     Lamb, Lion
+)
+
+from keras.optimizers.schedules import (
+    ExponentialDecay, PiecewiseConstantDecay, InverseTimeDecay,
+    PolynomialDecay, CosineDecay
 )
 
 from keras.metrics import (
@@ -32,61 +39,71 @@ LOG_DIR = os.path.join(STORAGE_DIR, "logs")
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# Default training hyperparameters
-DEFAULT_CONFIG = {
+# --- Global Training Configuration ---
+CONFIG = {
     "batch_size": 32,
     "epochs": 10,
+    "seed": 42,
+    "num_classes": 4,
+    "img_size": (224, 224),
+    
+    "optimizer": "adam",
+    "optimizer_params": {}, # Overrides default optimizer params
+    "learning_rate": 1e-3,
 
-    "optimizer": "adam", #  pick from the optimzer map below
-    "learning_rate" : 1e-3,
-    "momentum" : 0,
-    "weight_decay" : 1e-5,
+    "lr_scheduler": None, # e.g., "cosine_decay"
+    "lr_scheduler_params": {}, # Overrides default scheduler params
 
     "loss": "sparse_categorical_crossentropy",
     "metrics": [
-        Accuracy(name = "accuracy"),
+        Accuracy(name="accuracy"),
         Precision(name="precision"),
         Recall(name="recall"),
         AUC(name="auc")
     ],
 
-    "seed" : 42,
-    "num_classes" : 4,
-    "img_size" : (224, 224),
-
-    "N" : 20,
-    "remove_N" : 1,
+    # For custom model methods
+    "N": 20,
+    "remove_N": 1,
 }
 
-# default parameters for every optimizer
-PARAMS = {
-    "learning_rate" : DEFAULT_CONFIG["learning_rate"],
+# --- Optimizer Definitions ---
+OPTIMIZERS = {
+    "adam": {"class": Adam, "params": {}},
+    "adamw": {"class": AdamW, "params": {"weight_decay": 1e-5}},
+    "sgd": {"class": SGD, "params": {"momentum": 0.9}},
+    "rmsprop": {"class": RMSprop, "params": {"momentum": 0.9}},
+    "nadam": {"class": Nadam, "params": {}},
+    "adagrad": {"class": Adagrad, "params": {}},
+    "adadelta": {"class": Adadelta, "params": {}},
+    "adamax": {"class": Adamax, "params": {}},
+    "lamb": {"class": Lamb, "params": {}},
+    "lion": {"class": Lion, "params": {}},
 }
 
-# remove None and add a dict of extra params you want to add to the corresponding optimizer
-OPTIMIZER_MAP = { # [optimizer, parameters other than ones in params]
-    "sgd":  [SGD, dict( # update here for more params
-        momentum = DEFAULT_CONFIG["momentum"],
-                )],
-    "adam":  [Adam, None],
-    "rmsprop":  [RMSprop, dict( # update here for more params
-        momentum = DEFAULT_CONFIG["momentum"],
-        )],
-
-    "nadam":  [Nadam, None],
-    "adamw":  [AdamW, dict( # update here for more params
-        weight_decay = DEFAULT_CONFIG["weight_decay"],
-        )],
-    "adagrad":  [Adagrad, None],
-    "adadelta":  [Adadelta, None],
-    "adamax":  [Adamax, None],
-
-    "lamb":  [Lamb, None],
-    "lion":  [Lion, None],
+# --- Learning Rate Scheduler Definitions ---
+LR_SCHEDULERS = {
+    "exponential_decay": {
+        "class": ExponentialDecay,
+        "params": {"decay_steps": 10000, "decay_rate": 0.9, "staircase": True}
+    },
+    "piecewise_constant_decay": {
+        "class": PiecewiseConstantDecay,
+        "params": {"boundaries": [10000, 20000], "values": [1e-3, 0.5e-3, 0.1e-3]}
+    },
+    "polynomial_decay": {
+        "class": PolynomialDecay,
+        "params": {"decay_steps": 10000, "end_learning_rate": 1e-5, "power": 1.0}
+    },
+    "inverse_time_decay": {
+        "class": InverseTimeDecay,
+        "params": {"decay_steps": 1.0, "decay_rate": 0.5}
+    },
+    "cosine_decay": {
+        "class": CosineDecay,
+        "params": {"decay_steps": 10000}
+    }
 }
-
-CONFIG = DEFAULT_CONFIG.copy()
-
 
 def get_model_path(model_name: str, extension: str = ".keras") -> str:
     """

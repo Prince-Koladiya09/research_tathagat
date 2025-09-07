@@ -1,11 +1,11 @@
 import tensorflow as tf
 import keras
 from keras import layers
-from keras.models import Model
+from keras.models import Model as Keras_Model
 from cnn_base.loggers import Logger
-from .get_model import get_model
 from copy import deepcopy
-from cnn_base.config import CONFIG, PARAMS, OPTIMIZER_MAP, get_custom_layers, get_model_path, def_callbacks
+from .get_model import get_model
+from cnn_base.config import CONFIG, OPTIMIZERS, LR_SCHEDULERS, get_custom_layers, get_model_path, def_callbacks
 
 
 class Model(keras.Model) :
@@ -21,18 +21,17 @@ class Model(keras.Model) :
         self.callbacks = def_callbacks(self.logger)
         self.logger.info("CNN model initialized")
 
+    @staticmethod
+    def update_global_config(updates: dict) -> None :
+        """
+        Updates the global CONFIG dictionary.
+        This affects all future Model instances created without custom overrides.
+        """
+        CONFIG.update(updates)
+        print("Global config updated.")
+
 
     # ---------------- Model Handling ----------------
-    def rebuild_model(self) -> None :
-        if self.base_model is None or self.outputs_layer is None :
-            self.logger.error(f"Cannot rebuild model : {"base_model" if self.base_model is None else "outputs_layer"} missing")
-            return
-        try :
-            self.model = Model(inputs=self.base_model.input, outputs=self.outputs_layer)
-            self.logger.info("Model rebuilt successfully")
-        except Exception as e :
-            self.logger.error(f"Error rebuilding model : {e}")
-
     def get_base_model(self, name : str) :
         """
         Used to get the base keras model, example resnet50
@@ -49,23 +48,70 @@ class Model(keras.Model) :
         except Exception as e :
             self.logger.error(f"Error loading base model {name} : {e}")
 
-    def compile(self, lr : float = None) -> None :
-        """
-        If you do not provide learning rate, it takes default from config
-        """
+    def rebuild_model(self) -> None :
+        if self.base_model is None or self.outputs_layer is None :
+            self.logger.error(f"Cannot rebuild model : {"base_model" if self.base_model is None else "outputs_layer"} missing")
+            return
         try :
-            params = PARAMS.copy()
-            if lr :
-                params["learning_rate"] = lr
-            optimizer = OPTIMIZER_MAP[self.config["optimizer"]]
-            if optimizer[1] :
-                params.update(optimizer[1])
-            super().compile(
-                optimizer=optimizer[0](**params),
+            self.model = Keras_Model(inputs=self.base_model.input, outputs=self.outputs_layer)
+            self.logger.info("Model rebuilt successfully")
+        except Exception as e :
+            self.logger.error(f"Error rebuilding model : {e}")
+
+    def compile(self) -> None :
+        """
+        Compiles the model using the optimizer and learning rate (or scheduler)
+        specified in the instance's configuration (if not provided).
+        """
+        try:
+            learning_rate_or_schedule = self.config["learning_rate"]
+            scheduler_name = self.config.get("lr_scheduler")
+
+            if scheduler_name and scheduler_name in LR_SCHEDULERS:
+                scheduler_info = deepcopy(LR_SCHEDULERS[scheduler_name])
+                scheduler_class = scheduler_info["class"]
+                scheduler_params = scheduler_info["params"]
+                
+                # Override default scheduler params with user-defined ones
+                scheduler_params.update(self.config.get("lr_scheduler_params", {}))
+
+                # Some schedulers require the initial learning rate
+                if "initial_learning_rate" in scheduler_params or scheduler_name == "piecewise_constant_decay":
+                    # For PiecewiseConstantDecay, values can be relative to the learning rate
+                    if scheduler_name != "piecewise_constant_decay":
+                        scheduler_params["initial_learning_rate"] = self.config["learning_rate"]
+
+                learning_rate_or_schedule = scheduler_class(**scheduler_params)
+                self.logger.info(f"Using LR Scheduler: {scheduler_name}")
+            else:
+                self.logger.info(f"Using constant learning rate: {learning_rate_or_schedule}")
+
+            # 2. Instantiate the Optimizer
+            optimizer_name = self.config["optimizer"]
+            if optimizer_name not in OPTIMIZERS:
+                raise ValueError(f"Optimizer '{optimizer_name}' not found in configuration.")
+
+            optimizer_info = deepcopy(OPTIMIZERS[optimizer_name])
+            optimizer_class = optimizer_info["class"]
+            optimizer_params = optimizer_info["params"]
+
+            # Add learning rate and any user overrides
+            optimizer_params["learning_rate"] = learning_rate_or_schedule
+            optimizer_params.update(self.config.get("optimizer_params", {}))
+
+            optimizer_instance = optimizer_class(**optimizer_params)
+            
+            # 3. Compile the Keras Model
+            if not self.model:
+                self.logger.error("Cannot compile: self.model is not built yet.")
+                return
+
+            self.model.compile(
+                optimizer=optimizer_instance,
                 loss=self.config["loss"],
                 metrics=self.config["metrics"]
             )
-            self.logger.info(f"Model compiled with learning rate {lr}")
+            self.logger.info(f"Model compiled with Optimizer: {optimizer_name}")
         except Exception as e :
             self.logger.error(f"Error compiling model : {e}")
 
