@@ -2,11 +2,11 @@ import tensorflow as tf
 import keras
 from keras import layers
 from keras.models import Model as Keras_Model
-from cnn_base.loggers import Logger
 from copy import deepcopy
-from .get_model import get_model
-from cnn_base.config import CONFIG, OPTIMIZERS, LR_SCHEDULERS, get_custom_layers, get_model_path, def_callbacks
 from joblib import load, dump
+from .get_model import get_model
+from ..loggers import Logger
+from ..config import CONFIG, OPTIMIZERS, LR_SCHEDULERS, get_custom_layers, get_model_path, def_callbacks
 
 class Model(Keras_Model) :
     def __init__(self, name : str = "custom_model", **kwargs) :

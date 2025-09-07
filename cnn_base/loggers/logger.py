@@ -1,6 +1,6 @@
 import os
 import logging
-from cnn_base.config import LOG_DIR
+from ..config import LOG_DIR
 
 class Logger :
     def __init__(self, info_file : str = "training_info.txt", error_file : str = "training_error.log") :

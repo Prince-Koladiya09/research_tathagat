@@ -1,4 +1,4 @@
-from tensorflow import keras
+import keras
 
 class ProgressiveUnfreezer(keras.callbacks.Callback):
     def __init__(self, logger, block_size: int = 10, interval: int = 5):

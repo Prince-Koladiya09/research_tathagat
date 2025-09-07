@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from copy import deepcopy
 
 from keras import layers
 

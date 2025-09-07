@@ -1,4 +1,4 @@
-from tensorflow import keras
+import keras
 
 class DiscriminativeLRScheduler(keras.callbacks.Callback):
     def __init__(self, logger, base_lr=1e-4, multiplier=2.0):
