@@ -25,8 +25,11 @@ _MODEL_DICT = {
     "nasnetmobile": NASNetMobile,
 }
 
-def get_model(name : str) -> keras.Model :
-    pattern = re.compile("[^a-zA-Z0-9]")
-    name = re.sub(pattern, "", name).lower()
+def get_model(logger, name : str) -> keras.Model :
+    try :
+        pattern = re.compile("[^a-zA-Z0-9]")
+        name = re.sub(pattern, "", name).lower()
 
-    return _MODEL_DICT[name]
+        return _MODEL_DICT[name]
+    except Exception as e :
+        logger.error(e)
