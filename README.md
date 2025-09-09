@@ -30,7 +30,7 @@ It provides:
 
 ```bash
 # Clone repo
-git clone https://github.com/<your-username>/<repo-name>.git
+git clone https://github.com/Prince-Koladiya09/research_tathagat.git
 cd <repo-name>
 
 # Install library in editable mode
