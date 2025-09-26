@@ -12,6 +12,8 @@ keras_tuner
 # Extras
 # For Grad-CAM visualization
 opencv-python>=4.8.0
+# For attention maps
+math
 # For embeddings and dimensionality reduction
 umap-learn>=0.5.4
 plotly>=5.16.0

@@ -8,7 +8,7 @@ from ..loggers import Logger
 
 class DataLoader:
     def __init__(self, logger: Logger = None):
-        self.logger = logger if logger else Logger(name="DataLoader")
+        self.logger = logger if logger else Logger("Data_Loader", "data_info.log", "data_error.log")
 
     def _load_and_preprocess_image(self, image_path: str, image_size: tuple, mode: str) -> np.ndarray:
         try:
@@ -102,9 +102,12 @@ class DataLoader:
         self.logger.info(f"Data processing complete. Saved to '{output_dir}'.")
 
     @staticmethod
-    def download_from_kaggle(path: str, dataset_name: str) -> str:
-        logger = Logger("KaggleDownloader")
+    def download_from_kaggle(path: str = None, dataset_name: str = "uraninjo/augmented-alzheimer-mri-dataset") -> str:
+        logger = Logger("KaggleDownloader", "data_info.log", "data_error.log")
         logger.info(f"Downloading dataset '{dataset_name}' from Kaggle Hub...")
-        download_path = kagglehub.dataset_download(dataset_name, path)
+        if path :
+            download_path = kagglehub.dataset_download(dataset_name, path)
+        else :
+            download_path = kagglehub.dataset_download(dataset_name)
         logger.info(f"Dataset downloaded and unzipped to: {download_path}")
         return download_path

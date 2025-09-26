@@ -8,6 +8,7 @@ from sklearn.metrics import (
     confusion_matrix, roc_curve, auc, precision_recall_curve,
     average_precision_score, classification_report
 )
+import math
 
 
 class Visualizer:
@@ -324,25 +325,83 @@ class Visualizer:
                 loss = predictions[:, pred_index]
 
             grads = tape.gradient(loss, conv_outputs)[0]
-            pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-            conv_outputs = conv_outputs[0]
-
-            heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_outputs), axis=-1).numpy()
-            heatmap = np.maximum(heatmap, 0) / np.max(heatmap)
-
+            pooled_grads = tf.reduce_mean(grads, axis=(0, 1))
+            heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1).numpy()
+            heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
+            
             img = original_img if original_img is not None else img_array[0]
             heatmap = cv2.resize(heatmap, (img.shape[1], img.shape[0]))
             heatmap = np.uint8(255 * heatmap)
             heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-            superimposed_img = cv2.addWeighted(img.astype("uint8"), 1, heatmap, alpha, 0)
+            
+            superimposed_img = cv2.addWeighted(img.astype('uint8'), 1, heatmap.astype('uint8'), alpha, 0)
 
             plt.imshow(superimposed_img)
             plt.axis("off")
             plt.title("Grad-CAM")
             plt.show()
-            self.logger.info("Grad-CAM plotted successfully")
+            self.logger.info("Grad-CAM plotted successfully.")
         except Exception as e:
             self.logger.error(f"Error plotting Grad-CAM: {e}")
+
+
+    def plot_attention_maps(self, model, preprocessed_image, target_size):
+        """
+        Visualizes the attention maps from a Vision Transformer model.
+        
+        Args:
+            model (tf.keras.Model): The trained transformer model.
+            preprocessed_image (np.ndarray): A single preprocessed image with batch dimension (1, H, W, C).
+            target_size (tuple): The (height, width) of the original image for resizing maps.
+        """
+        self.logger.info("Attempting to visualize attention maps...")
+        try:
+            outputs = [layer.output for layer in model.layers if "attention" in layer.name.lower() and hasattr(layer, 'attention_scores')]
+            
+            if not outputs:
+                 outputs = [layer.output for layer in model.layers if isinstance(layer, tf.keras.layers.MultiHeadAttention)]
+
+            if not outputs:
+                self.logger.error("Could not find any attention layers in the model.")
+                return
+
+            attention_model = tf.keras.Model(inputs=model.inputs, outputs=outputs)
+            
+            att_maps = attention_model.predict(preprocessed_image)
+            
+            last_layer_maps = att_maps[-1]
+
+            # Shape is likely (batch_size, num_heads, sequence_len, sequence_len)
+            # We are interested in the attention from the [CLS] token to other patches
+            cls_token_attention = last_layer_maps[0, :, 0, 1:] # Exclude CLS token itself
+            
+            num_heads = cls_token_attention.shape[0]
+            num_patches = cls_token_attention.shape[1]
+            patch_dim = int(math.sqrt(num_patches))
+            
+            if patch_dim * patch_dim != num_patches:
+                self.logger.error(f"Cannot form a square grid from {num_patches} patches.")
+                return
+
+            # Plot all heads
+            fig, axes = plt.subplots(math.ceil(num_heads / 4), 4, figsize=(12, 12))
+            fig.suptitle("Attention Maps from CLS Token (Last Layer)")
+            axes = axes.ravel()
+            
+            for i in range(num_heads):
+                ax = axes[i]
+                attention_grid = cls_token_attention[i].reshape(patch_dim, patch_dim)
+                im = ax.imshow(attention_grid, cmap='viridis')
+                ax.set_title(f'Head {i+1}')
+                ax.axis('off')
+            
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            plt.show()
+            self.logger.info("Attention maps visualized successfully.")
+
+        except Exception as e:
+            self.logger.error(f"Failed to plot attention maps: {e}")
+
 
     def plot_embeddings(self, model=None, layer_name=None, data=None, labels=None, method="tsne", features=None, random_state=42):
         """

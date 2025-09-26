@@ -4,7 +4,7 @@ from ..config import LOG_DIR
 import re
 
 class Logger:
-    def __init__(self, name: str = "MyLibLogger", info_file: str = "training_info.log", error_file: str = "training_error.log"):
+    def __init__(self, name: str = "My_Lib_Logger", info_file: str = "training_info.log", error_file: str = "training_error.log"):
         self.logger = logging.getLogger(name)
         
         if not self.logger.handlers:

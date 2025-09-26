@@ -21,6 +21,7 @@ from keras.callbacks import (
 
 PROJECT_ROOT = os.getcwd()
 STORAGE_DIR = os.path.join(PROJECT_ROOT, "storage")
+CV_DIR = os.path.join(STORAGE_DIR, "cv_results")
 MODEL_DIR = os.path.join(STORAGE_DIR, "models")
 LOG_DIR = os.path.join(STORAGE_DIR, "logs")
 
