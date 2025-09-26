@@ -1,5 +1,6 @@
 import keras
 import tensorflow_hub as hub
+import re
 from keras.applications import (
     VGG16, VGG19, ResNet50, ResNet101, DenseNet121, DenseNet201, InceptionV3,
     InceptionResNetV2, Xception, EfficientNetB0, EfficientNetB7, MobileNetV2,
@@ -36,16 +37,31 @@ _HUB_URLS = {
     "convnext_tiny": "https://www.kaggle.com/models/keras/convnext/frameworks/TensorFlow2/variations/convnext_tiny_imagenet_1k_224/versions/1",
 }
 
-def _get_keras_app_model(model_name: str) -> keras.Model :
-    if model_name in _KERAS_MODEL_DICT :
-        return None
-    return _KERAS_MODEL_DICT[model_name]
+def _get_keras_app_model(name: str, **kwargs) -> keras.Model :
+    return _KERAS_MODEL_DICT[name](
+                weights=kwargs.get("weights", "imagenet"),
+                include_top=kwargs.get("include_top", False),
+                input_shape=kwargs["img_size"] + (3,)
+                )
 
-def _load_hub_model(model_name : str, input_shape, trainable=False) -> keras.Model :
-    if model_name in _HUB_URLS :
-        return None
+def _get_hub_model(model_name : str, **kwargs) -> keras.Model :
     handle = _HUB_URLS[model_name]
-    hub_layer = hub.KerasLayer(handle, trainable=trainable)
-    inputs = keras.Input(shape=input_shape)
+    hub_layer = hub.KerasLayer(handle, trainable=kwargs.get("trainable", False))
+    inputs = keras.Input(shape=kwargs["shape"])
     outputs = hub_layer(inputs)
     return keras.Model(inputs, outputs)
+
+def get_model(logger, name : str, **kwargs) -> keras.Model :
+    try :
+        pattern = re.compile("[^a-zA-Z0-9]")
+        name = re.sub(pattern, "", name).lower()
+
+        if name in _KERAS_MODEL_DICT :
+            return _get_keras_app_model(name, kwargs)
+        elif name in _HUB_URLS :
+            return _get_hub_model(name, kwargs)
+        else :
+            raise ValueError("Either model is not implemented or the names is not correct")
+
+    except Exception as e :
+        logger.error(e)

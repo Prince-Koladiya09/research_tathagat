@@ -14,17 +14,19 @@ class Base_Model(ABC):
         self.base_model = None
         self.model: Keras_Model = None
         self.outputs_layer: tf.Tensor = None
-        self.config = CONFIG.copy(deep=True, update=update_config_kwargs or {})
+        self.config = CONFIG.deepcopy()
         self.logger = Logger()
         self.callbacks = def_callbacks(self.logger)
         self.name = name
         self.logger.info("Base_Model initialized.")
 
     @staticmethod
-    def update_global_config(updates: dict) -> None:
-        global CONFIG
-        CONFIG = CONFIG.copy(update=updates)
-        print("Global config updated.")
+    def update_global_config(updates: dict, logger = None) -> None:
+        CONFIG.update(updates)
+        if logger :
+            logger.info("Global config updated.")
+        else :
+            print("Global config updated.")
 
     @abstractmethod
     def get_base_model(self, name: str) -> 'Base_Model':

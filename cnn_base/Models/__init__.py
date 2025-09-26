@@ -1,3 +1,3 @@
-from .base_model import Model
+from .import CNN, Transformers
 
-__all__ = ["Model"]
+__all__ = ["CNN", "Transformers"]
