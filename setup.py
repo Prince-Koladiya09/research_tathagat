@@ -1,9 +1,9 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="cnn_base",
-    version="0.1.0",
-    description="Base for a model for image prediction with CNN using Keras.",
+    name="adv_image_finetune",
+    version="0.2.0",
+    description="An advanced library for fine-tuning image classification models.",
     author="Meet Vyas, Prince Koladiya",
     packages=find_packages(),
     install_requires=[
@@ -16,6 +16,9 @@ setup(
         "scikit-learn",
         "kagglehub",
         "pillow",
+        "pydantic",
+        "tensorflow_hub",
+        "joblib"
     ],
     extras_require={
         "viz": [

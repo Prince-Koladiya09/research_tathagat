@@ -10,5 +10,6 @@ __all__ = [
     "Visualizer",
     "Models",
     "Callbacks",
-    "Tune_Hyperparameters"
+    "Tune_Hyperparameters",
+    "Cross_Validation"
 ]

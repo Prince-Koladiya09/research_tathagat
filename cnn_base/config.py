@@ -1,72 +1,64 @@
 import os
 from datetime import datetime
+from typing import List, Tuple, Any, Dict, Optional
 
+from pydantic import BaseModel, Field
 from keras import layers
-
 from keras.optimizers import (
     Adam, AdamW, Nadam, Adagrad, Adamax, Adadelta,
-    SGD, RMSprop,
-    Lamb, Lion
+    SGD, RMSprop, Lamb, Lion
 )
-
 from keras.optimizers.schedules import (
     ExponentialDecay, PiecewiseConstantDecay, InverseTimeDecay,
     PolynomialDecay, CosineDecay
 )
-
 from keras.metrics import (
     Accuracy, Precision, Recall, AUC
 )
-
 from keras.callbacks import (
     ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 )
 
-from .Callbacks import (
-    ProgressiveUnfreezer, DiscriminativeLRScheduler
-)
-
-# Root directory of the project
 PROJECT_ROOT = os.getcwd()
-
-# Storage directories
 STORAGE_DIR = os.path.join(PROJECT_ROOT, "storage")
 MODEL_DIR = os.path.join(STORAGE_DIR, "models")
 LOG_DIR = os.path.join(STORAGE_DIR, "logs")
 
-# Make sure directories exist
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# --- Global Training Configuration ---
-CONFIG = {
-    "batch_size": 32,
-    "epochs": 10,
-    "seed": 42,
-    "num_classes": 4,
-    "img_size": (224, 224),
-    
-    "optimizer": "adam",
-    "optimizer_params": {}, # Overrides default optimizer params
-    "learning_rate": 1e-3,
-
-    "lr_scheduler": None, # e.g., "cosine_decay"
-    "lr_scheduler_params": {}, # Overrides default scheduler params
-
-    "loss": "sparse_categorical_crossentropy",
-    "metrics": [
+class TrainingConfig(BaseModel):
+    batch_size: int = 32
+    epochs: int = 10
+    seed: int = 42
+    loss: str = "sparse_categorical_crossentropy"
+    metrics: List[Any] = [
         Accuracy(name="accuracy"),
         Precision(name="precision"),
         Recall(name="recall"),
         AUC(name="auc")
-    ],
+    ]
 
-    # For custom model methods
-    "N": 20,
-    "remove_N": 1,
-}
+class ModelConfig(BaseModel):
+    num_classes: int = 4
+    img_size: Tuple[int, int] = (224, 224)
+    N_layers_to_tune: int = 20
+    N_layers_to_remove: int = 1
 
-# --- Optimizer Definitions ---
+class OptimizerConfig(BaseModel):
+    name: str = "adam"
+    params: Dict[str, Any] = {}
+    learning_rate: float = 1e-3
+    scheduler_name: Optional[str] = None
+    scheduler_params: Dict[str, Any] = {}
+
+class GlobalConfig(BaseModel):
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+
+CONFIG = GlobalConfig()
+
 OPTIMIZERS = {
     "adam": {"class": Adam, "params": {}},
     "adamw": {"class": AdamW, "params": {"weight_decay": 1e-5}},
@@ -80,7 +72,6 @@ OPTIMIZERS = {
     "lion": {"class": Lion, "params": {}},
 }
 
-# --- Learning Rate Scheduler Definitions ---
 LR_SCHEDULERS = {
     "exponential_decay": {
         "class": ExponentialDecay,
@@ -104,21 +95,21 @@ LR_SCHEDULERS = {
     }
 }
 
-def get_model_path(model_name : str, extensions : tuple[str] = (".keras", "pkl")) -> str:
+def get_model_path(model_name: str, extension: str = ".keras") -> str:
     """
     Returns a unique path to save a model, including timestamp.
     Ensures every saved model has a base model name (no defaults).
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    name = os.path.join(MODEL_DIR, f"{model_name}_{timestamp}")
-    return tuple(os.path.join(name, extension) for extension in extensions)
+    filename = f"{model_name}_{timestamp}{extension}"
+    return os.path.join(MODEL_DIR, filename)
 
-
-def def_callbacks(logger) -> list:
+def def_callbacks(logger, model_name: str) -> list:
     """Change the default callbacks here"""
     try:
+        model_path = get_model_path(f"best_{model_name}")
         model_checkpoint = ModelCheckpoint(
-            filepath=get_model_path("best_model"),
+            filepath=model_path,
             save_best_only=True,
             monitor="val_loss",
             mode="min",
@@ -135,24 +126,20 @@ def def_callbacks(logger) -> list:
             monitor="val_loss",
             factor=0.2,
             patience=5,
-            min_lr=0.00001,
+            min_lr=1e-6,
             mode="min",
             verbose=1
         )
-        # Use custom callbacks here if you want
-        # progressive_unfreezer = ProgressiveUnfreezer(logger = logger)
-        # discriminative_lr_scheduler = DiscriminativeLRScheduler(logger = logger)
         callbacks = [model_checkpoint, early_stopping, reduce_lr]
-        logger.info("Callbacks defined successfully")
+        logger.info(f"Default callbacks defined successfully. Best model will be saved to {model_path}")
         return callbacks
     except Exception as e:
         logger.error(f"Error defining callbacks: {e}")
+        return []
 
-
-def get_custom_layers(num_classes : int) -> list :
-    """Change the layers here you want to add while fine tuning"""
+def get_custom_layers(num_classes: int, dropout_rate: float = 0.3) -> list:
     return [
         layers.GlobalAveragePooling2D(),
-        layers.Dropout(0.3),
-        layers.Dense(CONFIG["num_classes"], activation="softmax")
+        layers.Dropout(dropout_rate),
+        layers.Dense(num_classes, activation="softmax")
     ]
