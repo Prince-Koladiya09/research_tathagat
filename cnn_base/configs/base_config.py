@@ -21,14 +21,13 @@ from keras.callbacks import (
 
 PROJECT_ROOT = os.getcwd()
 STORAGE_DIR = os.path.join(PROJECT_ROOT, "storage")
-CV_DIR = os.path.join(STORAGE_DIR, "cv_results")
 MODEL_DIR = os.path.join(STORAGE_DIR, "models")
 LOG_DIR = os.path.join(STORAGE_DIR, "logs")
 
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-class TrainingConfig(BaseModel):
+class Training_Config(BaseModel):
     batch_size: int = 32
     epochs: int = 10
     seed: int = 42
@@ -40,25 +39,23 @@ class TrainingConfig(BaseModel):
         AUC(name="auc")
     ]
 
-class ModelConfig(BaseModel):
+class Model_Config(BaseModel):
     num_classes: int = 4
     img_size: Tuple[int, int] = (224, 224)
-    N_layers_to_tune: int = 20
-    N_layers_to_remove: int = 1
+    n_layers_to_tune: int = 20
+    n_layers_to_remove: int = 1
 
-class OptimizerConfig(BaseModel):
+class Optimizer_Config(BaseModel):
     name: str = "adam"
     params: Dict[str, Any] = {}
     learning_rate: float = 1e-3
     scheduler_name: Optional[str] = None
     scheduler_params: Dict[str, Any] = {}
 
-class GlobalConfig(BaseModel):
-    training: TrainingConfig = Field(default_factory=TrainingConfig)
-    model: ModelConfig = Field(default_factory=ModelConfig)
-    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-
-CONFIG = GlobalConfig()
+class Global_Config(BaseModel):
+    training: Training_Config = Field(default_factory=Training_Config)
+    model: Model_Config = Field(default_factory=Model_Config)
+    optimizer: Optimizer_Config = Field(default_factory=Optimizer_Config)
 
 OPTIMIZERS = {
     "adam": {"class": Adam, "params": {}},
@@ -97,16 +94,11 @@ LR_SCHEDULERS = {
 }
 
 def get_model_path(model_name: str, extension: str = ".keras") -> str:
-    """
-    Returns a unique path to save a model, including timestamp.
-    Ensures every saved model has a base model name (no defaults).
-    """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{model_name}_{timestamp}{extension}"
     return os.path.join(MODEL_DIR, filename)
 
 def def_callbacks(logger, model_name: str) -> list:
-    """Change the default callbacks here"""
     try:
         model_path = get_model_path(f"best_{model_name}")
         model_checkpoint = ModelCheckpoint(

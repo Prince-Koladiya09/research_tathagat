@@ -1,6 +1,6 @@
 import os
 import logging
-from ..config import LOG_DIR
+from ..configs.base_config import LOG_DIR
 import re
 
 class Logger:

@@ -1,160 +1,109 @@
 import tensorflow as tf
 import keras
-from keras import layers
-from transformers import TFAutoModel, AdamWeightDecay
+from keras.optimizers import AdamW
+
 from ..base_model import Base_Model
-import re
+from .providers import get_model as get_transformer_layers
+from ...configs.transformers_config import DEFAULT_TRANSFORMER_CONFIG
 
 class Model(Base_Model):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.logger.info("Transformer_Model initialized.")
-        
+    def __init__(self, name: str = "transformer_model", **kwargs):
+        super().__init__(name=name, config=DEFAULT_TRANSFORMER_CONFIG, **kwargs)
+
     def get_base_model(self, name: str) -> 'Model':
-        self.logger.info(f"Attempting to load Transformer model: {name}")
-        hf_path = self._MODEL_DICT.get(name.lower())
-        
-        if not hf_path:
-            self.logger.error(f"Transformer model '{name}' not found in registry. Searching on HuggingFace Hub.")
-            hf_path = name
-        
         try:
-            hf_model = TFAutoModel.from_pretrained(hf_path, from_pt=True)
-            input_tensor = layers.Input(shape=self.config.img_size + (3,), name="input_pixels")
+            inputs, outputs = get_transformer_layers(name, img_size=self.config.model.img_size)
+            self.base_model = keras.Model(inputs, outputs, name=name)
             
-            hf_output = hf_model(input_tensor, training=False).last_hidden_state
-            self.outputs_layer = hf_output[:, 0, :]
-            
-            # Encapsulate the HuggingFace model in a Keras layer to make it serializable
-            self.base_model = keras.Model(inputs=input_tensor, outputs=self.outputs_layer)
+            x = keras.layers.LayerNormalization(epsilon=1e-6)(self.base_model.output)
+            x = keras.layers.Dense(self.config.model.num_classes, activation="softmax", name="predictions")(x)
+            self.outputs_layer = x
+
             self._rebuild_model()
-            self.logger.info(f"Hugging Face transformer '{hf_path}' loaded successfully.")
+            self.logger.info(f"Transformer base model '{name}' built successfully with a new prediction head.")
         except Exception as e:
-            self.logger.error(f"Error loading transformer from Hugging Face '{hf_path}': {e}")
-            
-        return self
-        
-    def add_custom_layers(self, layers_list: list = None) -> 'Model':
-        if not self.base_model:
-            self.logger.error("Base model not loaded. Cannot add layers.")
-            return self
-            
-        if layers_list is None:
-            layers_list = [
-                layers.LayerNormalization(epsilon=1e-6),
-                layers.Dense(self.config.num_classes, activation="softmax", name="classifier")
-            ]
-        
-        x = self.outputs_layer
-        for l in layers_list:
-            x = l(x)
-        self.outputs_layer = x
-        self._rebuild_model()
-        self.logger.info("Added custom transformer classification head.")
+            self.logger.error(f"Error building Transformer base model '{name}': {e}")
         return self
 
-    def freeze_all_but_head(self) -> 'Model':
-        if not self.model: return self
-        for layer in self.model.layers:
-            if "classifier" not in layer.name:
-                layer.trainable = False
-        self.logger.info("Froze all layers except the classification head.")
-        return self
-
-    def freeze_all_but_biases(self) -> 'Model':
-        if not self.model: return self
-        for layer in self.model.layers:
-            if hasattr(layer, 'trainable_weights'):
-                for weight in layer.trainable_weights:
-                    if 'bias' not in weight.name:
-                        weight.trainable = False
-        self.logger.info("Froze all weights except for bias terms (BitFit).")
+    def freeze_patch_embeddings(self) -> 'Model':
+        try:
+            for layer in self.base_model.layers:
+                if 'patch_embeddings' in layer.name or 'embedding' in layer.name:
+                    layer.trainable = False
+            self.logger.info("Froze patch embedding layers.")
+        except Exception as e:
+            self.logger.error(f"Error freezing patch embeddings: {e}")
         return self
     
     def unfreeze_all(self) -> 'Model':
-        if not self.model: return self
-        for layer in self.model.layers:
+        for layer in self.base_model.layers:
             layer.trainable = True
-        self.logger.info("Unfroze all model layers.")
+        self.logger.info("Unfroze all transformer layers.")
         return self
-        
+
     def unfreeze_last_n_blocks(self, n_blocks: int) -> 'Model':
-        if not self.model: return self
-        
-        block_regex = re.compile(r"(layer|block)_\._\d+$", re.IGNORECASE)
-        transformer_layer = None
-        for layer in self.model.layers:
-             if 'main_layer' in layer.name and hasattr(layer, 'layers'):
-                  transformer_layer = layer
-                  break
-
-        if not transformer_layer:
-            self.logger.error("Could not find main transformer layer to unfreeze blocks.")
-            return self
+        try:
+            transformer_layers = [l for l in self.base_model.layers if 'transformer_block' in l.name or 'layer' in l.name]
             
-        self.logger.info("Freezing all transformer blocks initially.")
-        transformer_layer.trainable = False
-
-        blocks = [l for l in transformer_layer.layers if block_regex.search(l.name)]
-        if len(blocks) < n_blocks:
-            self.logger.warning(f"Requested to unfreeze {n_blocks}, but only {len(blocks)} blocks found. Unfreezing all.")
-            n_blocks = len(blocks)
-
-        for block in blocks[-n_blocks:]:
-            block.trainable = True
+            for layer in self.base_model.layers:
+                layer.trainable = False 
             
-        self.logger.info(f"Unfroze the last {n_blocks} transformer blocks.")
+            if n_blocks > len(transformer_layers):
+                 self.logger.warning(f"Requested to unfreeze {n_blocks}, but found only {len(transformer_layers)}. Unfreezing all of them.")
+                 n_blocks = len(transformer_layers)
+
+            for layer in transformer_layers[-n_blocks:]:
+                layer.trainable = True
+
+            for layer in self.model.layers:
+                if 'normalization' in layer.name or 'predictions' in layer.name:
+                    layer.trainable = True
+
+            self.logger.info(f"Unfroze the last {n_blocks} transformer blocks and the head.")
+        except Exception as e:
+            self.logger.error(f"Error unfreezing last {n_blocks} blocks: {e}")
         return self
+    
+    def compile_with_llrd(self, head_lr_multiplier: float = 2.0, decay_rate: float = 0.75) -> 'Model':
+        self.logger.info(f"Setting up optimizer with Layer-wise Learning Rate Decay (LLRD).")
         
-    def compile_with_llrd(self, head_lr_multiplier: float = 2.0, decay_rate: float = 0.75):
-        self.logger.info("Compiling with Layer-wise Learning Rate Decay (LLRD).")
-        if not self.model:
-            self.logger.error("Model must be built before compiling.")
-            return
-
         opt_config = self.config.optimizer
-        if 'adamw' not in opt_config.name:
-            self.logger.warning("LLRD is typically used with AdamW. Using the configured optimizer.")
-            
-        lr = self.config.learning_rate
-        wd = opt_config.params.get("weight_decay", 0.01)
+        learning_rate = opt_config.learning_rate
+        weight_decay = opt_config.params.get("weight_decay", 0.01)
 
-        block_regex = re.compile(r"(layer|block)_\._\d+$", re.IGNORECASE)
+        layer_lrs = {}
         
-        learning_rate_multipliers = {}
+        encoder_layers = [l for l in self.base_model.layers if 'transformer_block' in l.name or 'layer' in l.name]
+        num_encoder_layers = len(encoder_layers)
         
-        # Default for all variables
-        for var in self.model.trainable_variables:
-            learning_rate_multipliers[var.name] = 1.0
+        for i, layer in enumerate(encoder_layers):
+            lr_scale = decay_rate ** (num_encoder_layers - i - 1)
+            layer_lrs[layer.name] = learning_rate * lr_scale
+        
+        embedding_layer_names = [l.name for l in self.base_model.layers if 'embedding' in l.name]
+        for name in embedding_layer_names:
+            layer_lrs[name] = learning_rate * (decay_rate ** num_encoder_layers)
 
-        transformer_layer = next((l for l in self.model.layers if 'main_layer' in l.name and hasattr(l, 'layers')), None)
-        
-        if transformer_layer:
-            blocks = [l for l in transformer_layer.layers if block_regex.search(l.name)]
-            num_blocks = len(blocks)
-            
-            # Apply decay from bottom to top
-            for i, block in enumerate(blocks):
-                multiplier = decay_rate ** (num_blocks - i)
-                for var in block.trainable_variables:
-                    learning_rate_multipliers[var.name] = multiplier
-        
-        # Apply head multiplier
-        for layer in self.model.layers:
-            if 'classifier' in layer.name:
-                for var in layer.trainable_variables:
-                    learning_rate_multipliers[var.name] = head_lr_multiplier
+        head_layer_names = [l.name for l in self.model.layers if l not in self.base_model.layers]
+        for name in head_layer_names:
+            layer_lrs[name] = learning_rate * head_lr_multiplier
 
-        optimizer = AdamWeightDecay(
-            learning_rate=lr,
-            weight_decay_rate=wd,
-            learning_rate_multipliers=learning_rate_multipliers
+        optimizer = AdamW(learning_rate=learning_rate, weight_decay=weight_decay)
+        optimizer.learning_rate.assign(learning_rate)
+        optimizer.add_variable_with_custom_gradient(
+            'learning_rate_multipliers',
+            initial_value=layer_lrs,
+            dtype=tf.float32,
         )
         
-        self.model.compile(
-            optimizer=optimizer,
-            loss=self.config.loss,
-            metrics=self.config.metrics
-        )
-        self.logger.info(f"Model compiled with LLRD. Base LR: {lr}, Decay Rate: {decay_rate}")
+        try:
+            self.model.compile(
+                optimizer=optimizer,
+                loss=self.config.training.loss,
+                metrics=self.config.training.metrics
+            )
+            self.logger.info("Model compiled successfully with LLRD optimizer.")
+        except Exception as e:
+            self.logger.error(f"Error compiling model with LLRD: {e}")
+            
         return self

@@ -1,35 +1,29 @@
-import keras
-import re
-from keras.applications import (
-    VGG16, VGG19, ResNet50, ResNet101, ResNet152,
-    InceptionV3, Xception, DenseNet121, DenseNet169,
-    DenseNet201, EfficientNetB0, EfficientNetB1, EfficientNetB7,
-    MobileNetV2, NASNetMobile
-)
+from ..loggers import Logger
+from .CNN import Model as CNN_Model
+from .Transformers import Model as Transformer_Model
+from .CNN.providers import _KERAS_MODEL_DICT as cnn_keras_models, _HUB_URLS as cnn_hub_models
+from .Transformers.providers import _HUB_URLS as transformer_hub_models
 
-_MODEL_DICT = {
-    "vgg16": VGG16,
-    "vgg19": VGG19,
-    "resnet50": ResNet50,
-    "resnet101": ResNet101,
-    "resnet152": ResNet152,
-    "inceptionv3": InceptionV3,
-    "xception": Xception,
-    "densenet121": DenseNet121,
-    "densenet169": DenseNet169,
-    "densenet201": DenseNet201,
-    "efficientnetb0": EfficientNetB0,
-    "efficientnetb1": EfficientNetB1,
-    "efficientnetb7": EfficientNetB7,
-    "mobilenetv2": MobileNetV2,
-    "nasnetmobile": NASNetMobile,
-}
+logger = Logger("Model_Factory", "get_model_info.log", "get_model_error.log")
 
-def get_model(logger, name : str) -> keras.Model :
-    try :
-        pattern = re.compile("[^a-zA-Z0-9]")
-        name = re.sub(pattern, "", name).lower()
+def get_model(model_name: str, **kwargs):
+    clean_name = model_name.lower().replace('-', '_').replace(' ', '_')
 
-        return _MODEL_DICT[name]
-    except Exception as e :
-        logger.error(e)
+    cnn_models = list(cnn_keras_models.keys()) + list(cnn_hub_models.keys())
+    transformer_models = list(transformer_hub_models.keys())
+
+    if clean_name in cnn_models:
+        logger.info(f"'{model_name}' identified as a CNN. Instantiating CNN_Model.")
+        model_instance = CNN_Model(name=clean_name, **kwargs)
+        model_instance.get_base_model(clean_name)
+        return model_instance
+    
+    elif clean_name in transformer_models:
+        logger.info(f"'{model_name}' identified as a Vision Transformer. Instantiating Transformer_Model.")
+        model_instance = Transformer_Model(name=clean_name, **kwargs)
+        model_instance.get_base_model(clean_name)
+        return model_instance
+        
+    else:
+        logger.error(f"Model '{model_name}' not found in any model provider.")
+        raise ValueError(f"Model '{model_name}' is not supported.")

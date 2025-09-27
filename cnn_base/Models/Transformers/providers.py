@@ -1,7 +1,7 @@
-from transformers import TFAutoModel
+import keras
+import tensorflow_hub as hub
 
-
-_MODEL_DICT = {
+_HUB_URLS = {
     "vit-base": "google/vit-base-patch16-224-in21k",
     "vit-large": "google/vit-large-patch16-224-in21k",
     "swin-transformer": "microsoft/swin-base-patch4-window7-224-in22k",
@@ -11,7 +11,7 @@ _MODEL_DICT = {
     "beit": "microsoft/beit-base-patch16-224-pt22k-ft22k",
     "convnext": "facebook/convnext-base-224-22k",
     "mobilevit": "apple/mobilevit-small",
-    
+
     # Not implemented yet
     # "pvt" (Pyramid Vision Transformer)
     # "t2t-vit"
@@ -24,18 +24,27 @@ _MODEL_DICT = {
     # "hrnet"
     # "bit"
     # "noisy-student"
+
 }
 
-
-def get_hf_model(model_name: str, logger):
-    hf_path = _MODEL_DICT.get(model_name.lower())
-    if not hf_path:
-        return None
+def _get_hub_model(model_name: str, **kwargs):
+    handle = _HUB_URLS[model_name]
+    input_shape = kwargs["img_size"] + (3,)
     
-    try:
-        logger.info(f"Loading model '{hf_path}' from Hugging Face Hub...")
-        model = TFAutoModel.from_pretrained(hf_path, from_pt=True)
-        return model
-    except Exception as e:
-        logger.error(f"Error loading model '{hf_path}' from Hugging Face Hub: {e}")
-        return None
+    inputs = keras.Input(shape=input_shape)
+    hub_layer = hub.KerasLayer(handle, trainable=kwargs.get("trainable", True))
+    outputs = hub_layer(inputs)
+    
+    if isinstance(outputs, dict):
+        output_key = "default" if "default" in outputs else list(outputs.keys())[0]
+        final_output = outputs[output_key]
+    else:
+        final_output = outputs
+        
+    return inputs, final_output
+
+def get_model(name: str, **kwargs):
+    if name in _HUB_URLS:
+        return _get_hub_model(name, **kwargs)
+    else:
+        raise ValueError(f"Transformer model '{name}' is not implemented or the name is incorrect.")

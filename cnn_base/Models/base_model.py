@@ -1,103 +1,143 @@
 import tensorflow as tf
-from keras import Model as Keras_Model
+import keras
+from keras.models import Model as Keras_Model
+from copy import deepcopy
 from joblib import dump, load
 from abc import ABC, abstractmethod
 
 from ..loggers import Logger
-from ..config import (CONFIG, OPTIMIZERS, LR_SCHEDULERS,
-                    get_model_path, def_callbacks)
-from copy import deepcopy
+from ..configs.base_config import (
+    Global_Config, OPTIMIZERS, LR_SCHEDULERS, get_model_path, def_callbacks
+)
+from ..configs.cnn_config import DEFAULT_CNN_CONFIG
 
-class Base_Model(ABC):
-
-    def __init__(self, update_config_kwargs: dict = None, name: str = "custom_model"):
+class Base_Model(Keras_Model, ABC):
+    def __init__(self, name: str = "base_model", config: Global_Config = None, **kwargs):
+        super().__init__(name=name, **kwargs)
         self.base_model = None
         self.model: Keras_Model = None
         self.outputs_layer: tf.Tensor = None
-        self.config = CONFIG.deepcopy()
-        self.logger = Logger()
-        self.callbacks = def_callbacks(self.logger)
-        self.name = name
-        self.logger.info("Base_Model initialized.")
+        self.config: Global_Config = deepcopy(config) if config else deepcopy(DEFAULT_CNN_CONFIG)
+        self.logger: Logger = Logger(name=self.name)
+        self.callbacks: list = def_callbacks(self.logger, self.name)
+        self.logger.info(f"Model '{self.name}' initialized.")
+        self.logger.debug(f"Initial config: {self.config.model_dump_json(indent=2)}")
 
     @staticmethod
-    def update_global_config(updates: dict, logger = None) -> None:
-        CONFIG.update(updates)
-        if logger :
-            logger.info("Global config updated.")
-        else :
-            print("Global config updated.")
+    def update_global_config(updates: dict) -> None:
+        updated_dict = DEFAULT_CNN_CONFIG.model_dump()
+        updated_dict.update(updates)
+        new_config = Global_Config.model_validate(updated_dict)
+        Logger().info(f"Global config updated to: {new_config.model_dump_json(indent=2)}")
 
     @abstractmethod
     def get_base_model(self, name: str) -> 'Base_Model':
-        pass
-
-    @abstractmethod
-    def add_custom_layers(self, layers_list: list = None) -> 'Base_Model':
-        pass
+        raise NotImplementedError
 
     def _rebuild_model(self) -> 'Base_Model':
-        if self.base_model and self.outputs_layer is not None:
-            try:
-                self.model = Keras_Model(inputs=self.base_model.input, outputs=self.outputs_layer)
-                self.logger.info("Model rebuilt successfully.")
-            except Exception as e:
-                self.logger.error(f"Error rebuilding model: {e}")
-        else:
-            self.logger.error("Cannot rebuild model: Base model or output layer is missing.")
+        if self.base_model is None or self.outputs_layer is None:
+            self.logger.error("Cannot rebuild model: base_model or outputs_layer is missing.")
+            return self
+        try:
+            self.model = Keras_Model(inputs=self.base_model.input, outputs=self.outputs_layer)
+            self.logger.info("Model rebuilt successfully.")
+        except Exception as e:
+            self.logger.error(f"Error rebuilding model: {e}")
         return self
 
-    def compile(self) -> 'Base_Model':
+    def compile(self, optimizer_config: dict = None) -> 'Base_Model':
         try:
-            lr_config = self.config.lr_scheduler
-            lr_or_schedule = self.config.learning_rate
-            if lr_config.name and lr_config.name in LR_SCHEDULERS:
-                scheduler_info = deepcopy(LR_SCHEDULERS[lr_config.name])
-                scheduler_params = scheduler_info["params"]
-                scheduler_params.update(lr_config.params)
-                if "initial_learning_rate" in scheduler_params or scheduler_info['class'].__name__ == "CosineDecay":
-                    scheduler_params["initial_learning_rate"] = self.config.learning_rate
-                lr_or_schedule = scheduler_info["class"](**scheduler_params)
-                self.logger.info(f"Using LR Scheduler: {lr_config.name}")
-
             opt_config = self.config.optimizer
-            if opt_config.name not in OPTIMIZERS:
-                raise ValueError(f"Optimizer '{opt_config.name}' not recognized.")
+            if optimizer_config:
+                opt_config = opt_config.model_copy(update=optimizer_config)
+
+            learning_rate = opt_config.learning_rate
+            
+            if opt_config.scheduler_name and opt_config.scheduler_name in LR_SCHEDULERS:
+                scheduler_info = deepcopy(LR_SCHEDULERS[opt_config.scheduler_name])
+                scheduler_params = scheduler_info["params"]
+                scheduler_params.update(opt_config.scheduler_params)
+                if "initial_learning_rate" in scheduler_params:
+                     scheduler_params["initial_learning_rate"] = learning_rate
+                learning_rate = scheduler_info["class"](**scheduler_params)
+                self.logger.info(f"Using LR Scheduler: {opt_config.scheduler_name}")
             
             optimizer_info = deepcopy(OPTIMIZERS[opt_config.name])
             optimizer_params = optimizer_info["params"]
             optimizer_params.update(opt_config.params)
             
-            optimizer_instance = optimizer_info["class"](learning_rate=lr_or_schedule, **optimizer_params)
-
-            if not self.model:
-                self.logger.error("Cannot compile: self.model is not built yet.")
-                return self
-                
+            if "learning_rate" not in optimizer_info["class"].__init__.__code__.co_varnames:
+                optimizer_instance = optimizer_info["class"](**optimizer_params)
+                keras.backend.set_value(optimizer_instance.learning_rate, learning_rate)
+            else:
+                optimizer_params["learning_rate"] = learning_rate
+                optimizer_instance = optimizer_info["class"](**optimizer_params)
+            
             self.model.compile(
                 optimizer=optimizer_instance,
-                loss=self.config.loss,
-                metrics=self.config.metrics
+                loss=self.config.training.loss,
+                metrics=self.config.training.metrics
             )
-            self.logger.info(f"Model compiled with Optimizer: {opt_config.name}")
-
+            self.logger.info(f"Model compiled with Optimizer: {opt_config.name} and Loss: {self.config.training.loss}")
         except Exception as e:
             self.logger.error(f"Error compiling model: {e}")
         return self
 
-    def fit(self, train_data, validation_data, **kwargs):
-        epochs = kwargs.get('epochs', self.config.epochs)
-        batch_size = kwargs.get('batch_size', self.config.batch_size)
-        callbacks = kwargs.get('callbacks', self.callbacks)
+    def summary(self) -> None:
+        if self.model:
+            self.model.summary(print_fn=lambda x: self.logger.info(x))
+        else:
+            self.logger.error("No model to summarize.")
 
+    def call(self, inputs, training=False):
+        return self.model(inputs, training=training)
+
+    def save(self, file_path: str = None):
         try:
-            self.logger.info(f"Starting training for {epochs} epochs...")
+            if file_path is None:
+                file_path_keras = get_model_path(self.name, ".keras")
+                file_path_wrapper = get_model_path(self.name, ".pkl")
+            else:
+                file_path_keras = file_path + ".keras"
+                file_path_wrapper = file_path + ".pkl"
+
+            self.model.save(file_path_keras)
+            
+            model_to_save = self.model
+            self.model = None
+            dump(self, file_path_wrapper)
+            self.model = model_to_save
+
+            self.logger.info(f"Model saved to {file_path_keras} and wrapper to {file_path_wrapper}")
+        except Exception as e:
+            self.logger.error(f"Error saving model: {e}")
+
+    @staticmethod
+    def load(wrapper_path: str) -> 'Base_Model':
+        try:
+            model_wrapper = load(wrapper_path)
+            keras_path = wrapper_path.replace(".pkl", ".keras")
+            model_wrapper.model = keras.models.load_model(keras_path, compile=False)
+            model_wrapper.logger.info(f"Model wrapper loaded from {wrapper_path}")
+            model_wrapper.logger.info(f"Keras model loaded from {keras_path}. Re-compile the model before training.")
+            return model_wrapper
+        except Exception as e:
+            Logger().error(f"Error loading model from {wrapper_path}: {e}")
+            return None
+
+    def fit(self, train_data, validation_data, **kwargs):
+        fit_config = self.config.training.model_dump()
+        fit_config.update(kwargs)
+        self.logger.info(f"Starting training for {fit_config['epochs']} epochs with batch size {fit_config['batch_size']}.")
+        
+        try:
             history = self.model.fit(
                 train_data,
                 validation_data=validation_data,
-                epochs=epochs,
-                batch_size=batch_size,
-                callbacks=callbacks
+                epochs=fit_config['epochs'],
+                batch_size=fit_config['batch_size'],
+                callbacks=kwargs.get('callbacks', self.callbacks),
+                verbose=kwargs.get('verbose', 1)
             )
             self.logger.info("Training finished successfully.")
             return history
@@ -105,42 +145,12 @@ class Base_Model(ABC):
             self.logger.error(f"Error during training: {e}")
             return None
 
-    def save(self, file_names: tuple[str] = None):
-        if not self.model:
-            self.logger.error("No model to save.")
-            return
-
-        try:
-            if file_names is None:
-                model_name = self.base_model.name if self.base_model else self.name
-                file_names = get_model_path(model_name)
-
-            self.model.save(file_names[0])
-            with open(file_names[1], 'wb') as f:
-                dump(self, f)
-            self.logger.info(f"Model saved as {file_names[0]} and wrapper as {file_names[1]}")
-
-        except Exception as e:
-            self.logger.error(f"Error saving model: {e}")
-
-    @staticmethod
-    def load(file_name: str):
-        try:
-            with open(file_name, 'rb') as f:
-                model_wrapper = load(f)
-            print(f"Model wrapper loaded from {file_name}")
-            return model_wrapper
-        except Exception as e:
-            print(f"Error loading model wrapper: {e}")
-
-    def summary(self) -> None:
-        if self.model:
-            self.model.summary()
-        else:
-            self.logger.error("No model to summarize.")
-
     def predict(self, data, **kwargs):
-        return self.model.predict(data, **kwargs)
+        pred_config = self.config.training.model_dump()
+        pred_config.update(kwargs)
+        return self.model.predict(data, batch_size=pred_config['batch_size'], verbose=kwargs.get('verbose', 1))
 
     def evaluate(self, data, **kwargs):
-        return self.model.evaluate(data, **kwargs)
+        eval_config = self.config.training.model_dump()
+        eval_config.update(kwargs)
+        return self.model.evaluate(data, batch_size=eval_config['batch_size'], verbose=kwargs.get('verbose', 1))

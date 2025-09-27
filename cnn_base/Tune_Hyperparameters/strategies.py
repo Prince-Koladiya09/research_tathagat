@@ -1,4 +1,5 @@
-from keras import layers
+from ..Models.CNN import Model as CNN_Model
+from ..Models.Transformers import Model as Transformer_Model
 
 """
 Two examples are given for search spaces and strategies
@@ -10,27 +11,30 @@ def A() -> tuple :
     """
     returns : tuple(a_function_defining_the_search_space, a_function_defining_strategy_for_tuning)
     """
-    def search_space_A(hp) -> dict :
+    def search_space_A(hp):
+        """
+        Search space for a typical CNN fine-tuning task.
+        """
         return {
-            "optimizer": hp.Choice("optimizer", values=["adam", "rmsprop"]),
-            "learning_rate": hp.Float("learning_rate", min_value=1e-5, max_value=1e-3, sampling="log")
+            "base_model_name": hp.Choice("base_model_name", values=["resnet50", "efficientnetb0", "mobilenetv2"]),
+            "learning_rate": hp.Float("learning_rate", min_value=1e-5, max_value=1e-3, sampling="log"),
+            "optimizer": hp.Choice("optimizer", values=["adam", "adamw", "sgd"]),
+            "unfreeze_layers": hp.Int("unfreeze_layers", min_value=10, max_value=50, step=10)
         }
 
-    def strategy_A(model, hp):
+    def strategy_A(model: CNN_Model, hp, hps: dict):
         """
-        Strategy A: A simple transfer learning approach.
-        - Uses a fixed base model.
-        - Tunes how many layers to unfreeze.
+        Strategy for a CNN:
+        - Unfreezes the last N layers based on the hyperparameter search.
+        - Compiles with the chosen optimizer and learning rate.
         """
-        base_model_name = "ResNet50"
-        num_layers_to_unfreeze = hp.Int("unfreeze_layers", min_value=10, max_value=40, step=10)
-
-        model.get_base_model(base_model_name)
         model.freeze_all()
-        model.unfreeze_later_N(num_layers_to_unfreeze)
-        model.add_custom_layers() # Uses default custom layers
-        model.compile()
-
+        model.unfreeze_later_n(n=hps["unfreeze_layers"])
+        
+        model.compile(optimizer_config={
+            "name": hps["optimizer"],
+            "learning_rate": hps["learning_rate"]
+        })
     return (search_space_A, strategy_A)
 
 def B() -> tuple :
@@ -38,42 +42,38 @@ def B() -> tuple :
     returns : tuple(a_function_defining_the_search_space, a_function_defining_strategy_for_tuning)
     """
     def search_space_B(hp):
+        """
+        Search space for a Vision Transformer fine-tuning task.
+        """
         return {
-            "optimizer": "adamw", # Fixed optimizer
-            "learning_rate": 1e-4, # Fixed learning rate
-            "num_classes": 4 # Your config can be used here too
+            "base_model_name": "vit_base",
+            "unfreeze_blocks": hp.Int("unfreeze_blocks", min_value=1, max_value=4, step=1),
+            "use_llrd": hp.Boolean("use_llrd"),
+            "llrd_decay_rate": hp.Float("llrd_decay_rate", min_value=0.65, max_value=0.9, sampling="linear", parent_name="use_llrd", parent_values=[True]),
+            "head_lr_multiplier": hp.Float("head_lr_multiplier", min_value=1.5, max_value=5.0, sampling="linear", parent_name="use_llrd", parent_values=[True]),
+            "learning_rate": hp.Float("learning_rate", min_value=1e-5, max_value=8e-5, sampling="log"),
+            "weight_decay": hp.Float("weight_decay", min_value=1e-3, max_value=1e-1, sampling="log"),
         }
 
-    def strategy_B(model, hp):
+    def strategy_B(model: Transformer_Model, hp, hps: dict):
         """
-        Strategy B: A more complex approach.
-        - Uses a powerful base model.
-        - Tunes which block to cut the model at.
-        - Tunes the dropout rate and number of units in a custom head.
+        Strategy for a Transformer:
+        - Unfreezes the last N transformer blocks.
+        - Decides whether to use Layer-wise Learning Rate Decay (LLRD).
+        - If LLRD is used, tunes its decay rate.
+        - If not, compiles with a standard AdamW optimizer.
         """
-        base_model_name = "ResNet50"
+        model.unfreeze_last_n_blocks(n_blocks=hps["unfreeze_blocks"])
         
-        # Let's imagine ResNet50 has these layers to choose from
-        cut_layer_name = hp.Choice("cut_at_layer", values=["conv4_block6_out", "conv3_block4_out"])
-        
-        # Define a tunable custom head
-        hp_units = hp.Int("dense_units", min_value=128, max_value=512, step=128)
-        hp_dropout = hp.Float("dropout_rate", min_value=0.1, max_value=0.5, step=0.1)
-
-        custom_head = [
-            layers.GlobalAveragePooling2D(),
-            layers.Dense(units=hp_units, activation="relu"),
-            layers.Dropout(hp_dropout),
-            layers.Dense(model.config["num_classes"], activation="softmax")
-        ]
-
-        model.get_base_model(base_model_name)
-        model.cut_at_layer_and_add_custom_layers(
-            layer_name=cut_layer_name,
-            layers_list=custom_head
-        )
-        # For this strategy, we decide to train all unfrozen layers
-        model.unfreeze_all()
-        model.compile()
-
+        if hps.get("use_llrd", False):
+            model.compile_with_llrd(
+                head_lr_multiplier=hps["head_lr_multiplier"],
+                decay_rate=hps["llrd_decay_rate"]
+            )
+        else:
+            model.compile(optimizer_config={
+                "name": "adamw",
+                "learning_rate": hps["learning_rate"],
+                "params": {"weight_decay": hps["weight_decay"]}
+            })
     return (search_space_B, strategy_B)

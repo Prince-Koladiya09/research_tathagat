@@ -1,6 +1,5 @@
 import keras
 import tensorflow_hub as hub
-import re
 from keras.applications import (
     VGG16, VGG19, ResNet50, ResNet101, DenseNet121, DenseNet201, InceptionV3,
     InceptionResNetV2, Xception, EfficientNetB0, EfficientNetB7, MobileNetV2,
@@ -8,19 +7,14 @@ from keras.applications import (
 )
 
 _KERAS_MODEL_DICT = {
-    # VGG
     "vgg16": VGG16,
     "vgg19": VGG19,
-    # ResNet
     "resnet50": ResNet50,
     "resnet101": ResNet101,
-    # DenseNet
     "densenet121": DenseNet121,
     "densenet201": DenseNet201,
-    # Inception
     "inceptionv3": InceptionV3,
     "inceptionresnetv2": InceptionResNetV2,
-    # Others
     "xception": Xception,
     "efficientnetb0": EfficientNetB0,
     "efficientnetb7": EfficientNetB7,
@@ -29,39 +23,45 @@ _KERAS_MODEL_DICT = {
 }
 
 _HUB_URLS = {
-    "se_resnet50": "https://www.kaggle.com/models/google/se-resnet-50/frameworks/TensorFlow2/variations/classification/versions/1",
-    "resnext101": "https://www.kaggle.com/models/google/resnext/frameworks/TensorFlow2/variations/101-26x4d/versions/1",
-    "regnety_800mf": "https://www.kaggle.com/models/keras/regnet/frameworks/TensorFlow2/variations/regnety008/versions/1",
-    "bit_r50x1": "https://www.kaggle.com/models/google/bit/frameworks/TensorFlow2/variations/m-r50x1/versions/1",
-    "noisy_student_efficientnet_l2": "https://www.kaggle.com/models/google/efficientnet-v2/frameworks/TensorFlow2/variations/imagenet1k-l-21k-ft1k/versions/2",
-    "convnext_tiny": "https://www.kaggle.com/models/keras/convnext/frameworks/TensorFlow2/variations/convnext_tiny_imagenet_1k_224/versions/1",
+    "se_resnet50": "https://tfhub.dev/google/imagenet/se_resnet_50/feature_vector/1",
+    "resnext101": "https://tfhub.dev/google/imagenet/resnext_101/feature_vector/4",
+    "regnety_800mf": "https://tfhub.dev/google/regnety_008/imagenet/feature_vector/1",
+    "bit_r50x1": "https://tfhub.dev/google/bit/m-r50x1/1",
+    "noisy_student_efficientnet_l2": "https://tfhub.dev/google/efficientnet/noisy-student/l2/feature-vector/1",
+    "convnext_tiny": "https://tfhub.dev/google/convnext_tiny_1k_224/feature_vector/2",
 }
 
-def _get_keras_app_model(name: str, **kwargs) -> keras.Model :
-    return _KERAS_MODEL_DICT[name](
-                weights=kwargs.get("weights", "imagenet"),
-                include_top=kwargs.get("include_top", False),
-                input_shape=kwargs["img_size"] + (3,)
-                )
+def _get_keras_app_model(name: str, **kwargs):
+    model_fn = _KERAS_MODEL_DICT[name]
+    input_shape = kwargs["img_size"] + (3,)
+    
+    base_model = model_fn(
+        weights=kwargs.get("weights", "imagenet"),
+        include_top=kwargs.get("include_top", False),
+        input_shape=input_shape
+    )
+    return base_model.input, base_model.output
 
-def _get_hub_model(model_name : str, **kwargs) -> keras.Model :
+def _get_hub_model(model_name: str, **kwargs):
     handle = _HUB_URLS[model_name]
-    hub_layer = hub.KerasLayer(handle, trainable=kwargs.get("trainable", False))
-    inputs = keras.Input(shape=kwargs["shape"])
+    input_shape = kwargs["img_size"] + (3,)
+    
+    inputs = keras.Input(shape=input_shape)
+    hub_layer = hub.KerasLayer(handle, trainable=kwargs.get("trainable", True))
     outputs = hub_layer(inputs)
-    return keras.Model(inputs, outputs)
+    
+    if isinstance(outputs, dict):
+        output_key = "default" if "default" in outputs else list(outputs.keys())[0]
+        final_output = outputs[output_key]
+    else:
+        final_output = outputs
+        
+    return inputs, final_output
 
-def get_model(logger, name : str, **kwargs) -> keras.Model :
-    try :
-        pattern = re.compile("[^a-zA-Z0-9]")
-        name = re.sub(pattern, "", name).lower()
-
-        if name in _KERAS_MODEL_DICT :
-            return _get_keras_app_model(name, kwargs)
-        elif name in _HUB_URLS :
-            return _get_hub_model(name, kwargs)
-        else :
-            raise ValueError("Either model is not implemented or the names is not correct")
-
-    except Exception as e :
-        logger.error(e)
+def get_model(name: str, **kwargs):
+    if name in _KERAS_MODEL_DICT:
+        return _get_keras_app_model(name, **kwargs)
+    elif name in _HUB_URLS:
+        return _get_hub_model(name, **kwargs)
+    else:
+        raise ValueError(f"CNN model '{name}' is not implemented or the name is incorrect.")
