@@ -2,29 +2,17 @@ import keras
 import tensorflow_hub as hub
 
 _HUB_URLS = {
-    "vit-base": "google/vit-base-patch16-224-in21k",
-    "vit-large": "google/vit-large-patch16-224-in21k",
-    "swin-transformer": "microsoft/swin-base-patch4-window7-224-in22k",
-    "swin-v2": "microsoft/swinv2-base-patch4-window12-192-22k",
-    "deit-small": "facebook/deit-small-distilled-patch16-224",
-    "deit-base": "facebook/deit-base-distilled-patch16-224",
-    "beit": "microsoft/beit-base-patch16-224-pt22k-ft22k",
-    "convnext": "facebook/convnext-base-224-22k",
-    "mobilevit": "apple/mobilevit-small",
-
-    # Not implemented yet
-    # "pvt" (Pyramid Vision Transformer)
-    # "t2t-vit"
-    # "cvt" (Convolutional Vision Transformer)
-    # "vitaev2"
-    # "efficientformer-l1"
-    # "convmixer"
-    # "poolformer"
-    # "twins-svt"
-    # "hrnet"
-    # "bit"
-    # "noisy-student"
-
+    "vit_base": "https://tfhub.dev/google/vit_base_patch16_224/1",
+    "vit_large": "https://tfhub.dev/google/vit_large_patch16_224/1",
+    "swin_transformer": "https://tfhub.dev/google/swin_tiny_patch4_window7_224/1",
+    "deit_base": "https://tfhub.dev/google/deit/base_distilled_patch16_224/1",
+    "beit": "https://tfhub.dev/google/beit/base/patch16/224/1",
+    "mobilevit": "https://tfhub.dev/google/mobilevit/xs/1",
+    "poolformer": "https://www.kaggle.com/models/sayannath/poolformer/frameworks/TensorFlow2/variations/poolformer-s12-fe/versions/1",
+    "pvt": "https://www.kaggle.com/models/sayannath/pvt/frameworks/TensorFlow2/variations/pvt-tiny-fe/versions/1",
+    "twins-svt": "https://www.kaggle.com/models/sayannath/twins-svt/frameworks/TensorFlow2/variations/twins-svt-s-fe/versions/1",
+    "t2t-vit": "https://www.kaggle.com/models/sayannath/t2t-vit/frameworks/TensorFlow2/variations/t2t-vit-14-fe/versions/1",
+    "efficientformer-l1": "https://www.kaggle.com/models/google/efficientformer/frameworks/TensorFlow2/variations/l1-fe/versions/1",
 }
 
 def _get_hub_model(model_name: str, **kwargs):
