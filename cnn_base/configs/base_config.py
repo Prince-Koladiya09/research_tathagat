@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from typing import List, Tuple, Any, Dict, Optional
 
+from collections.abc import Iterable
 from pydantic import BaseModel, Field
 from keras import layers
 from keras.optimizers import (
@@ -23,6 +24,7 @@ PROJECT_ROOT = os.getcwd()
 STORAGE_DIR = os.path.join(PROJECT_ROOT, "storage")
 MODEL_DIR = os.path.join(STORAGE_DIR, "models")
 LOG_DIR = os.path.join(STORAGE_DIR, "logs")
+TRACK_DIR = os.path.join(STORAGE_DIR, "tracking")
 
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -95,8 +97,11 @@ LR_SCHEDULERS = {
 
 def get_model_path(model_name: str, extension: str = ".keras") -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{model_name}_{timestamp}{extension}"
-    return os.path.join(MODEL_DIR, filename)
+    if isinstance(extension, Iterable) :
+        return (os.path.join(MODEL_DIR, f"{model_name}_{timestamp}{x}") for x in extension)
+    else :
+        filename = f"{model_name}_{timestamp}{extension}"
+        return os.path.join(MODEL_DIR, filename)
 
 def def_callbacks(logger, model_name: str) -> list:
     try:
