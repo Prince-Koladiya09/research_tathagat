@@ -11,20 +11,11 @@ _HUB_URLS = {
     "beit": "microsoft/beit-base-patch16-224-pt22k-ft22k",
     "convnext": "facebook/convnext-base-224-22k",
     "mobilevit": "apple/mobilevit-small",
-
-    # Not implemented yet
-    # "pvt" (Pyramid Vision Transformer)
-    # "t2t-vit"
-    # "cvt" (Convolutional Vision Transformer)
-    # "vitaev2"
-    # "efficientformer-l1"
-    # "convmixer"
-    # "poolformer"
-    # "twins-svt"
-    # "hrnet"
-    # "bit"
-    # "noisy-student"
-
+    "poolformer": "https://www.kaggle.com/models/sayannath/poolformer/frameworks/TensorFlow2/variations/poolformer-s12-fe/versions/1",
+    "pvt": "https://www.kaggle.com/models/sayannath/pvt/frameworks/TensorFlow2/variations/pvt-tiny-fe/versions/1",
+    "twins-svt": "https://www.kaggle.com/models/sayannath/twins-svt/frameworks/TensorFlow2/variations/twins-svt-s-fe/versions/1",
+    "t2t-vit": "https://www.kaggle.com/models/sayannath/t2t-vit/frameworks/TensorFlow2/variations/t2t-vit-14-fe/versions/1",
+    "efficientformer-l1": "https://www.kaggle.com/models/google/efficientformer/frameworks/TensorFlow2/variations/l1-fe/versions/1",
 }
 
 def _get_hub_model(model_name: str, **kwargs):
