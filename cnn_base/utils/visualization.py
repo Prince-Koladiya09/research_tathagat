@@ -9,19 +9,13 @@ from sklearn.metrics import (
     average_precision_score, classification_report
 )
 import math
+from ..loggers import Logger
 
 
 class Visualizer:
-    def __init__(self, logger):
-        """
-        logger: instance of your Logger class\n
-        **Example:**
-
-        ```python
-        from loggers import Logger
-        visualizer = Visualizer(logger=Logger())
-        ```
-        """
+    def __init__(self, logger = None):
+        if not logger :
+            logger = Logger("Visualization_Logger", "visualization_info.log", "visualization_error.log")
         self.logger = logger
 
     # --------------------------- MUST HAVE --------------------------- #

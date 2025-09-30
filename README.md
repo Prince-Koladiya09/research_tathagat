@@ -1,195 +1,279 @@
-# 🧠 cnn\_base – CNN Training & Visualization Library
+# Vision-Tuner: An Advanced Library for Fine-Tuning Vision Models
 
-A **lightweight, modular deep learning library** for **training, fine-tuning, and interpreting CNN models** using **Keras/TensorFlow**.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.9+-blue.svg" alt="Python Version">
+  <img src="https://img.shields.io/badge/Framework-TensorFlow_2.12+_%7C_Keras_3-orange.svg" alt="Framework">
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
+</p>
 
-It provides:
+**Vision-Tuner** is a high-level, research-focused library built on Keras 3 and TensorFlow 2 for rapidly fine-tuning, evaluating, and analyzing state-of-the-art image classification models.
 
-* Prebuilt CNN architectures: ResNet, DenseNet, EfficientNet, MobileNet, etc.
-* Custom callbacks for **progressive unfreezing & learning rate scheduling**.
-* Easy **dataset preprocessing & augmentation**.
-* Rich **visualizations**: training metrics, confusion matrix, Grad-CAM, embeddings.
-* **Fine-tuning** support: freeze/unfreeze layers, cut/add layers, add custom layers.
-* **Explainable AI (XAI)** support: LIME & SHAP.
+It moves beyond generic wrappers by providing specialized, architecture-aware classes for both **Convolutional Neural Networks (CNNs)** and **Vision Transformers (ViTs)**, enabling you to leverage advanced, model-specific fine-tuning techniques out of the box.
 
----
+## Core Philosophy
 
-## 🚀 Features
+This library is built on four pillars designed to accelerate your research workflow:
 
-| Feature              | Description                                                                               |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| **Data Handling**    | Auto train/val/test split, supports folder-based datasets, easy batch loading.            |
-| **Model Building**   | Use `Model` class to quickly build any CNN. Availability of many models from Keras        |
-| **Custom Callbacks** | Progressive unfreezing, discriminative learning rates, early stopping, ReduceLROnPlateau. |
-| **Visualization**    | Metrics plots, confusion matrix, ROC/PR curves, embeddings (t-SNE/UMAP), Grad-CAM.        |
-| **Explainability**   | LIME and SHAP for image-level explanations.                                               |
-| **Logging**          | Centralized logging for experiments.                                                      |
+1.  **🧠 Specialized Architectures:** Instead of a one-size-fits-all approach, the library provides distinct `CNN_Model` and `Transformer_Model` classes. This allows for implementing and using fine-tuning strategies that are tailored to each architecture, such as progressive unfreezing for CNNs or Layer-wise Learning Rate Decay (LLRD) for Transformers.
 
----
+2.  **⚙️ Reproducible Workflow:** Experiments are driven by a robust, Pydantic-based configuration system. This ensures that all settings are type-safe and clearly defined within your Python scripts, making your experimental setup transparent and easier to reproduce.
 
-## 📦 Installation
+3.  **🚀 Advanced Fine-Tuning:** The library exposes powerful fine-tuning methods directly on the model objects. Freeze the patch embeddings of a ViT, unfreeze the last N blocks, or progressively unfreeze a CNN with simple, intuitive method calls.
+
+4.  **📊 Deep Analysis & Interpretation:** Go beyond accuracy scores. The integrated `Visualizer` provides essential tools for model interpretation, including Grad-CAM and Attention Map plotting, alongside robust evaluation metrics and error analysis.
+
+## 📦 Model Zoo
+
+The library provides a comprehensive collection of pre-trained models, ready for fine-tuning.
+
+<details>
+<summary><b>Click to expand the full list of supported models</b></summary>
+
+| Type            | Model Family             | Variants                                                                                                  |
+|-----------------|--------------------------|-----------------------------------------------------------------------------------------------------------|
+| **CNN**         | VGG                      | `vgg16`, `vgg19`                                                                                          |
+|                 | ResNet                   | `resnet50`, `resnet101`, `se_resnet50`                                                                    |
+|                 | ResNeXt                  | `resnext101`                                                                                              |
+|                 | DenseNet                 | `densenet121`, `densenet201`                                                                              |
+|                 | Inception                | `inceptionv3`, `inceptionresnetv2`                                                                        |
+|                 | Xception                 | `xception`                                                                                                |
+|                 | EfficientNet             | `efficientnetb0`, `efficientnetb7`                                                                        |
+|                 | MobileNet                | `mobilenetv2`                                                                                             |
+|                 | NASNet                   | `nasnetmobile`                                                                                            |
+|                 | ConvNeXt                 | `convnext_tiny`                                                                                           |
+|                 | RegNet                   | `regnety_800mf`                                                                                           |
+|                 | HRNet                    | `hrnet`                                                                                                   |
+|                 | **BiT (Big Transfer)**   | `bit_r50x1`, `bit_r101x3`, `bit_r152x4`                                                                   |
+|                 | **Noisy Student**        | `noisy_student_efficientnet_l2`, `noisy_student_efficientnet_b1` through `b6`                             |
+| **Transformer** | **ViT (Vision Trans.)**  | `vit_base`, `vit_large`                                                                                   |
+|                 | Swin Transformer         | `swin_transformer`                                                                                        |
+|                 | DeiT                     | `deit_base`                                                                                               |
+|                 | BEiT                     | `beit`                                                                                                    |
+|                 | MobileViT                | `mobilevit`                                                                                               |
+|                 | **PVT (Pyramid VT)**     | `pvt`                                                                                                     |
+|                 | **T2T-ViT**              | `t2t-vit`                                                                                                 |
+|                 | **PoolFormer**           | `poolformer`                                                                                              |
+|                 | **Twins-SVT**            | `twins-svt`                                                                                               |
+|                 | **EfficientFormer**      | `efficientformer-l1`                                                                                      |
+
+</details>
+
+## ⚡ Installation
+
+As this library is packaged with `setup.py`, you can easily install it in your environment.
 
 ```bash
-# Clone repo
-git clone https://github.com/Prince-Koladiya09/research_tathagat.git
-cd <repo-name>
+# 1. Clone the repository
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
 
-# Install library in editable mode
-pip install -e .
+# 2. Install the library
+# This command installs all dependencies from requirements.txt and makes
+# the 'cnn_base' package available for import in your projects.
+pip install .
+
+# For developers: install in "editable" mode to reflect code changes instantly
+# pip install -e .
 ```
 
-Or manually:
+## 🚀 Core Workflow: A Quick Start
 
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## ⚡ Quick Examples
-
-### 1️⃣ Load & preprocess dataset
+This example demonstrates the core power of the library: easily instantiating, fine-tuning, and training different model architectures.
 
 ```python
-from cnn_base.Data.data import Data
+from cnn_base.Models import get_model
+from cnn_base.Data import DataLoader
+import numpy as np
 
-# Automatically split dataset into train/val/test
-train_ds, val_ds, test_ds = Data.fetch_and_save_data("datasets/cats_vs_dogs")
+# 1. Load and preprocess your data
+# This will create a 'processed_data' directory with .npy files
+loader = DataLoader()
+loader.fetch_and_save_data(data_dir='path/to/your/dataset')
+X_train = np.load('processed_data/X_train.npy')
+y_train = np.load('processed_data/y_train.npy')
+X_val = np.load('processed_data/X_val.npy')
+y_val = np.load('processed_data/y_val.npy')
+
+# -------------------------------------------------------------------
+# Example 1: Fine-tuning a Convolutional Neural Network (CNN)
+# -------------------------------------------------------------------
+print("--- Training a CNN ---")
+model_cnn = get_model("efficientnetb0") # The factory returns a CNN_Model instance
+
+# Apply a CNN-specific fine-tuning strategy
+model_cnn.freeze_all()
+model_cnn.unfreeze_later_n(30) # Unfreeze the last 30 layers
+model_cnn.compile()
+
+# Train the model
+cnn_history = model_cnn.fit(
+    train_data=(X_train, y_train),
+    validation_data=(X_val, y_val),
+    epochs=10
+)
+
+# -------------------------------------------------------------------
+# Example 2: Fine-tuning a Vision Transformer (ViT)
+# -------------------------------------------------------------------
+print("\n--- Training a Vision Transformer ---")
+model_vit = get_model("vit_base") # The factory returns a Transformer_Model instance
+
+# Apply a Transformer-specific fine-tuning strategy
+model_vit.unfreeze_last_n_blocks(2) # Unfreeze only the last 2 transformer blocks
+
+# Use an optimizer with Layer-wise Learning Rate Decay (LLRD)
+model_vit.compile_with_llrd()
+
+# Train the model
+vit_history = model_vit.fit(
+    train_data=(X_train, y_train),
+    validation_data=(X_val, y_val),
+    epochs=10
+)
 ```
 
-### 2️⃣ Build a model
+### **Visualizing Model Performance and Interpretability**
+
+After training your model, use the `Visualizer` class to gain deep insights into its performance and decision-making process.
 
 ```python
-from cnn_base.Models.base_model import Model
+from cnn_base.utils import Visualizer
+from cnn_base.loggers import Logger
+from cnn_base.Models import CNN_Model, Transformer_Model
+import numpy as np
 
-# Using the custom Model wrapper for training, callbacks, and fine-tuning
-model = Model(update_config_kwargs={"num_classes": 2})
-model.get_base_model("resnet50")
-model.add_custom_layers()  # adds pooling + dropout + softmax
-model.compile(lr=1e-4)
-model.summary()
+# --- Setup -------------------------------------------------------------------
+# Assume you have these variables available after training your model:
+#
+# model: The trained model object (either a CNN_Model or Transformer_Model).
+# history: The history object returned by the model.fit() method.
+# X_test, y_test: Your test dataset and corresponding true labels.
+# class_names: A list of your class names, e.g., ['Cat', 'Dog'].
+# -----------------------------------------------------------------------------
+
+# 1. Initialize the Visualizer
+visualizer = Visualizer()
+
+# 2. Get model predictions for the test set
+# We need both the class probabilities and the final predicted classes.
+y_pred_probs = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred_probs, axis=1)
+
+# 3. Plot Training and Evaluation Metrics
+print("--- Plotting Training and Evaluation Metrics ---")
+
+# Visualize the training & validation loss and accuracy over epochs
+visualizer.plot_training_history(history)
+
+# Plot a confusion matrix to see class-wise performance
+visualizer.plot_confusion_matrix(y_test, y_pred_classes, class_names=class_names)
+
+# Plot the Receiver Operating Characteristic (ROC) curve for each class
+visualizer.plot_roc_curve(y_test, y_pred_probs, n_classes=len(class_names))
+
+
+# 4. Plot Model Interpretability to Understand "Why"
+print("\n--- Plotting Model Interpretability ---")
+
+# Select a single image from the test set to explain
+sample_image = X_test[0]
+
+# The library can use the best visualization method based on the model's architecture.
+if isinstance(model, CNN_Model):
+    # For CNNs, Grad-CAM highlights the "hotspots" the model used for its decision.
+    # The method automatically tries to find the last convolutional layer.
+    print("Model is a CNN. Generating Grad-CAM...")
+    visualizer.plot_grad_cam(model.model, sample_image)
+
+elif isinstance(model, Transformer_Model):
+    # For Transformers, plotting the attention maps from the final block shows
+    # which parts of the image the model "paid attention" to.
+    print("Model is a Transformer. Generating Attention Maps...")
+    visualizer.plot_attention_maps(model.model, sample_image)
+
 ```
 
-### 3️⃣ Fine-tuning & custom layers
+## Advanced Usage Snippets
+
+#### Cross-Validation
+
+Easily run k-fold cross-validation to get a robust estimate of your model's performance.
 
 ```python
-from keras import layers
+from cnn_base.Cross_Validation import Cross_Validator
 
-# Freeze first 100 layers
-model.freeze_early_N(100)
+# Pass a list of model names to validate
+validator = Cross_Validator(
+    model_names=["resnet50", "mobilenetv2"],
+    X=X_train,
+    y=y_train,
+    n_splits=5
+)
 
-# Add custom classification head
-custom_layers = [
-    layers.GlobalAveragePooling2D(),
-    layers.Dropout(0.4),
-    layers.Dense(4, activation='softmax')
-]
-model.add_custom_layers(custom_layers)
-
-# Optional: unfreeze last 20 layers for gradual fine-tuning
-model.unfreeze_later_N(20)
+# The run method handles model creation, fine-tuning, and training for each fold
+results_df = validator.run(epochs=5)
+print(results_df)
+validator.save_results("cross_validation_report.csv")
 ```
 
-### 4️⃣ Train with callbacks
+#### Hyperparameter Tuning
+
+Use the built-in KerasTuner integration with predefined strategies for complex hyperparameter sweeps.
 
 ```python
-from cnn_base.Callbacks import ProgressiveUnfreezer, DiscriminativeLRScheduler
+from cnn_base.Tune_Hyperparameters import tune, strategies
 
-progressive_unfreezer = ProgressiveUnfreezer(logger = logger)
-discriminative_lr_scheduler = DiscriminativeLRScheduler(logger = logger)
+# Use a predefined search space and strategy for Transformers
+tuner = tune(
+    strategy_function=strategies.transformer_fine_tuning_strategy_B,
+    search_space_fn=strategies.search_space_B,
+    train_data=(X_train, y_train),
+    validation_data=(X_val, y_val),
+    project_name="ViT_LLRD_Tuning"
+)
 
-callbacks = [model_checkpoint, early_stopping, reduce_lr, progressive_unfreezer, discriminative_lr_scheduler]
-
-history = model.fit(train_dataset, val_dataset, epochs=20, batch_size=32, callbacks=callbacks)
+# The results are automatically saved to a CSV file in 'storage/tuning_results/'
+best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+print("Best hyperparameters found:", best_hps.values)
 ```
 
-### 5️⃣ Visualize performance
 
-```python
-from cnn_base.utils.visualization import Visualizer
+## 🔮 Coming Soon
 
-viz = Visualizer(logger)
-y_true = [y for _, y in test_ds]
-y_pred = model.predict(test_ds)
+This library is under active development. Upcoming features planned to enhance the research workflow include:
 
-# Confusion matrix
-viz.plot_confusion_matrix(y_true, y_pred, class_names=["Cat", "Dog"])
-
-# ROC curve
-viz.plot_roc_curve(y_true, y_pred, n_classes=2)
-
-# Training history
-viz.plot_training_history(history)
-
-# Grad-CAM for a single image
-img = next(iter(test_ds))[0][0].numpy()
-viz.plot_grad_cam(model.model, img_array=np.expand_dims(img, axis=0), last_conv_layer_name="conv5_block3_out", original_img=img)
-```
-
-###  Embeddings & Explainability
-
-```python
-# t-SNE embeddings
-features, reduced = viz.plot_embeddings(model=model, layer_name="avg_pool", data=test_ds, labels=y_true, method="tsne")
-
-# LIME explanation
-sample_img = next(iter(test_ds))[0][0].numpy()
-viz.plot_lime_explanation(model.model, sample_img)
-
-# SHAP explanation (requires small background dataset)
-background = next(iter(train_ds))[0][:50]  # 50 images for background
-viz.plot_shap_explanation(model.model, background_data=background, images_to_explain=sample_img, class_names=["Cat", "Dog"])
-```
-
----
+-   **[Coming Soon] Automated Experiment Tracking:** A dedicated module to automatically log all experiment parameters, metrics, and artifacts to a central, queryable location.
+-   **[Coming Soon] Advanced Evaluation:** Modules for robust evaluation techniques like Model Ensembling and Test-Time Augmentation (TTA).
 
 ## 🗂️ Project Structure
 
 ```
-mylib/
-│
-│── Callbacks/ # Custom training callbacks
-│ ├── discriminative_lr.py
-│ └── progressive_unfreeze.py
-│
-├── Data/ # Data preprocessing + loading
-│ └── data.py
-│
-├── loggers/ # Logging utilities
-│ └── logger.py
-│
-├── Models/ # Model definitions
-│ ├── base_model.py
-│ └── get_model.py
-│
-├── utils/ # Visualization tools
-│ └── visualization.py
-│
-└── config.py # Global config
+cnn_base/
+├── configs/
+│   ├── base_config.py
+│   ├── cnn_config.py
+│   └── transformers_config.py
+├── Cross_Validation/
+│   └── validator.py
+├── Data/
+│   └── data.py
+├── loggers/
+│   └── logger.py
+├── Models/
+│   ├── CNN/
+│   │   ├── Callbacks/
+│   │   ├── model.py
+│   │   └── providers.py
+│   ├── Transformers/
+│   │   ├── Callbacks/
+│   │   ├── __init__.py
+│   │   ├── model.py
+│   │   └── providers.py
+│   ├── base_model.py
+│   └── get_model.py
+├── Tune_Hyperparameters/
+│   ├── strategies.py
+│   └── tuner.py
+└── utils/
+    └── visualization.py
 ```
-
----
-
-## 🛠️ Requirements
-
-Core:
-
-* tensorflow>=2.12
-* keras>=2.12
-* numpy
-* pandas
-* matplotlib
-* scikit-learn
-* pillow
-
-Optional:
-
-* opencv-python → Grad-CAM
-* umap-learn, plotly → embeddings
-* lime, shap → explainability
-
----
-
-## 👨‍💻 Authors
-
-* Meet Vyas
-* Prince Koladiya
