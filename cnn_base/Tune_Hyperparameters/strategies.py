@@ -1,5 +1,5 @@
-from ..Models.CNN import Model as CNN_Model
-from ..Models.Transformers import Model as Transformer_Model
+from ..Models import CNN
+from ..Models import Transformers
 
 """
 Two examples are given for search spaces and strategies
@@ -22,7 +22,7 @@ def A() -> tuple :
             "unfreeze_layers": hp.Int("unfreeze_layers", min_value=10, max_value=50, step=10)
         }
 
-    def strategy_A(model: CNN_Model, hp, hps: dict):
+    def strategy_A(model: CNN, hp, hps: dict):
         """
         Strategy for a CNN:
         - Unfreezes the last N layers based on the hyperparameter search.
@@ -55,7 +55,7 @@ def B() -> tuple :
             "weight_decay": hp.Float("weight_decay", min_value=1e-3, max_value=1e-1, sampling="log"),
         }
 
-    def strategy_B(model: Transformer_Model, hp, hps: dict):
+    def strategy_B(model: Transformers, hp, hps: dict):
         """
         Strategy for a Transformer:
         - Unfreezes the last N transformer blocks.

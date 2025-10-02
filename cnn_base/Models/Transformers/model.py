@@ -1,30 +1,28 @@
-import tensorflow as tf
 import keras
-from keras.optimizers import AdamW
-
 from ..base_model import Base_Model
 from .providers import get_model as get_transformer_layers
 from ...configs.transformers_config import DEFAULT_TRANSFORMER_CONFIG
 
+import tensorflow as tf
+from keras.optimizers import AdamW
+
+@keras.saving.register_keras_serializable()
 class Model(Base_Model):
-    def __init__(self, name: str = "transformer_model", **kwargs):
-        super().__init__(name=name, config=DEFAULT_TRANSFORMER_CONFIG, **kwargs)
-
-    def get_base_model(self, name: str) -> 'Model':
-        try:
-            inputs, outputs = get_transformer_layers(name, img_size=self.config.model.img_size)
-            self.base_model = keras.Model(inputs, outputs, name=name)
-            
-            x = keras.layers.LayerNormalization(epsilon=1e-6)(self.base_model.output)
-            x = keras.layers.Dense(self.config.model.num_classes, activation="softmax", name="predictions")(x)
-            self.outputs_layer = x
-
-            self._rebuild_model()
-            self.logger.info(f"Transformer base model '{name}' built successfully with a new prediction head.")
-        except Exception as e:
-            self.logger.error(f"Error building Transformer base model '{name}': {e}")
-        return self
-
+    def __init__(self, base_model_name: str, **kwargs):
+        # 1. Get base model layers
+        base_inputs, base_outputs = get_transformer_layers(base_model_name, img_size=DEFAULT_TRANSFORMER_CONFIG.model.img_size)
+        
+        # 2. Build the new head
+        x = keras.layers.LayerNormalization(epsilon=1e-6)(base_outputs)
+        x = keras.layers.Dense(DEFAULT_TRANSFORMER_CONFIG.model.num_classes, activation="softmax", name="predictions")(x)
+        
+        # 3. Initialize parent Keras model with the full graph
+        super().__init__(inputs=base_inputs, outputs=x, name=base_model_name, **kwargs)
+        
+        # 4. Set up our custom attributes
+        self.setup_custom_attributes(config=DEFAULT_TRANSFORMER_CONFIG)
+        self.base_model_name = base_model_name
+    
     def freeze_patch_embeddings(self) -> 'Model':
         try:
             for layer in self.base_model.layers:

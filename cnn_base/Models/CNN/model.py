@@ -1,26 +1,42 @@
-import tensorflow as tf
 from typing import List
 import keras
 
 from ..base_model import Base_Model
 from .providers import get_model as get_cnn_layers
-from ...configs.base_config import get_custom_layers
+from ...configs.base_config import get_custom_layers, Global_Config
 from ...configs.cnn_config import DEFAULT_CNN_CONFIG
 
-class Model(Base_Model):
-    def __init__(self, name: str = "cnn_model", **kwargs):
-        super().__init__(name=name, config=DEFAULT_CNN_CONFIG, **kwargs)
 
-    def get_base_model(self, name: str) -> 'Model':
-        try:
-            inputs, outputs = get_cnn_layers(name, img_size=self.config.model.img_size)
-            self.base_model = keras.Model(inputs, outputs, name=name)
-            self.outputs_layer = self.base_model.output
-            self._rebuild_model()
-            self.logger.info(f"CNN base model '{name}' built successfully.")
-        except Exception as e:
-            self.logger.error(f"Error building CNN base model '{name}': {e}")
-        return self
+@keras.saving.register_keras_serializable()
+class Model(Base_Model):
+    def __init__(self, base_model_name: str, **kwargs):
+        # 1. Get the layers for the base model first
+        inputs, outputs = get_cnn_layers(base_model_name, img_size=DEFAULT_CNN_CONFIG.model.img_size)
+        
+        # 2. Initialize the parent keras.Model with these layers
+        # This call solves the TypeError.
+        super().__init__(inputs=inputs, outputs=outputs, name=base_model_name, **kwargs)
+        
+        # 3. Now that we are a valid Keras model, set up our custom attributes
+        self.setup_custom_attributes(config=DEFAULT_CNN_CONFIG, base_model_name = base_model_name)
+    
+    def get_config(self):
+        config = super().get_config()
+        config.update({"base_model_name" : self.base_model_name})
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        pydantic_config_dict = config.pop("config", None)
+        
+        # Create the instance using the constructor arguments
+        instance = cls(**config)
+        
+        # If a pydantic config was saved, re-apply it
+        if pydantic_config_dict:
+            instance.config = Global_Config.model_validate(pydantic_config_dict)
+
+        return instance
 
     def _set_trainable_status(self, layers_to_modify: List[keras.layers.Layer], trainable: bool):
         count = 0
@@ -90,7 +106,7 @@ class Model(Base_Model):
         except Exception as e:
             self.logger.error(f"Error during unfreeze_after_layer : {e}")
         return self
-    
+
     def add_custom_layers(self, layers_list: list = None) -> 'Model':
         """
         layers : list of keras.layers.Layer
@@ -102,16 +118,15 @@ class Model(Base_Model):
             if layers_list is None:
                 layers_list = get_custom_layers(self.config.model.num_classes)
             
-            x = self.outputs_layer
+            x = self.output
             for layer in layers_list:
                 x = layer(x)
-            self.outputs_layer = x
             
-            self._rebuild_model()
+            new_model = keras.Model(inputs=self.input, outputs=x)
             self.logger.info(f"Added {len(layers_list)} custom layers to the model head.")
         except Exception as e:
             self.logger.error(f"Error adding custom layers: {e}")
-        return self
+        return new_model
 
     def add_layers_in_between(self, layer_name : str, layers : list[keras.layers.Layer]) -> 'Model' :
         """
@@ -137,7 +152,7 @@ class Model(Base_Model):
 
             self.outputs_layer = x
 
-            self._rebuild_model()
+            super().__init__(inputs=self.base_model.input, outputs=self.outputs_layer)
             self.logger.info(f"Added custom layers after {layer_name}")
         except Exception as e :
             self.logger.error(e)
@@ -153,7 +168,7 @@ class Model(Base_Model):
                 x = layer(x)
             self.outputs_layer = x
             
-            self._rebuild_model()
+            super().__init__(inputs=self.base_model.input, outputs=self.outputs_layer)
             self.logger.info(f"Cut model at '{layer_name}' and added {len(layers_list)} custom layers.")
         except Exception as e:
             self.logger.error(f"Error cutting and adding layers at '{layer_name}': {e}")
@@ -163,7 +178,7 @@ class Model(Base_Model):
         try:
             self.outputs_layer = self.model.get_layer(layer_name).output
             
-            self._rebuild_model()
+            super().__init__(inputs=self.base_model.input, outputs=self.outputs_layer)
             self.logger.info(f"Cut model at '{layer_name}'.")
         except Exception as e:
             self.logger.error(f"Error cutting at '{layer_name}': {e}")
@@ -173,7 +188,7 @@ class Model(Base_Model):
         try :
             last_second_layer = self.model.layers[-2]
             self.outputs_layer = last_second_layer.output
-            self._rebuild_model()
+            super().__init__(inputs=self.base_model.input, outputs=self.outputs_layer)
             self.logger.info("Removed last layer")
         except Exception as e :
             self.logger.error(e)
@@ -192,6 +207,7 @@ class Model(Base_Model):
             
             remove_after_layer = self.model.layers[-(n + 1)].name
             self.outputs_layer = self.model.get_layer(remove_after_layer).output
+            super().__init__(inputs=self.base_model.input, outputs=self.outputs_layer)
             self.logger.info(f"Removed last {n} layers")
         except Exception as e :
             self.logger.error(e)
@@ -208,7 +224,7 @@ class Model(Base_Model):
                 x = layer(x)
             self.outputs_layer = x
 
-            self._rebuild_model()
+            super().__init__(inputs=self.base_model.input, outputs=self.outputs_layer)
             self.logger.info(f"Removed {layer_name} layer and reconnected network")
         except Exception as e :
             self.logger.error(e)
