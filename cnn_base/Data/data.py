@@ -6,7 +6,7 @@ import re
 import kagglehub
 from ..loggers import Logger
 
-class DataLoader:
+class Data_Loader:
     def __init__(self, logger: Logger = None):
         self.logger = logger if logger else Logger("Data_Loader", "data_info.log", "data_error.log")
 

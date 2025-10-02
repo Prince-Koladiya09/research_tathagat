@@ -1,8 +1,8 @@
 import os
-from datetime import datetime
-from typing import List, Tuple, Any, Dict, Optional
+import time
+from typing import List, Tuple, Any, Dict, Optional, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from keras import layers
 from keras.optimizers import (
     Adam, AdamW, Nadam, Adagrad, Adamax, Adadelta,
@@ -20,7 +20,7 @@ from keras.callbacks import (
 )
 
 PROJECT_ROOT = os.getcwd()
-STORAGE_DIR = os.path.join(PROJECT_ROOT, "storage")
+STORAGE_DIR = os.path.join(PROJECT_ROOT, f"storage/{time.strftime("%d%m%Y_%H%M%S")}")
 MODEL_DIR = os.path.join(STORAGE_DIR, "models")
 LOG_DIR = os.path.join(STORAGE_DIR, "logs")
 
@@ -38,6 +38,11 @@ class Training_Config(BaseModel):
         Recall(name="recall"),
         AUC(name="auc")
     ]
+    model_config = ConfigDict(arbitrary_types_allowed = True)
+
+    @field_serializer("metrics")
+    def serialize_metrics(self, metrics, _info) -> List[str] :
+        return [m.name if hasattr(m, "name") else str(m) for m in metrics]
 
 class Model_Config(BaseModel):
     num_classes: int = 4
@@ -51,8 +56,10 @@ class Optimizer_Config(BaseModel):
     learning_rate: float = 1e-3
     scheduler_name: Optional[str] = None
     scheduler_params: Dict[str, Any] = {}
+    model_config = ConfigDict(arbitrary_types_allowed = True)
 
 class Global_Config(BaseModel):
+    edit_mode: ClassVar[bool] = True
     training: Training_Config = Field(default_factory=Training_Config)
     model: Model_Config = Field(default_factory=Model_Config)
     optimizer: Optimizer_Config = Field(default_factory=Optimizer_Config)
@@ -93,9 +100,9 @@ LR_SCHEDULERS = {
     }
 }
 
-def get_model_path(model_name: str, extension: str = ".keras") -> str:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{model_name}_{timestamp}{extension}"
+def get_model_path(model_name: str, extension: str = "keras") -> str:
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    filename = f"{model_name}_{timestamp}.{extension}"
     return os.path.join(MODEL_DIR, filename)
 
 def def_callbacks(logger, model_name: str) -> list:

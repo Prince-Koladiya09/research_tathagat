@@ -1,3 +1,3 @@
-from .data import fetch_and_save_data, download_from_kaggle
+from .data import Data_Loader
 
-__all__ = ["download_from_kaggle", "fetch_and_save_data"]
+__all__ = ["Data_Loader"]

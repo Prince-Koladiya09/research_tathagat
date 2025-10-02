@@ -4,8 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 
-**/abcd
-**/abcd.*
+main.*
+
+storage/
 
 # Virtual environments
 .env/
