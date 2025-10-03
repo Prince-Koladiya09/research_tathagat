@@ -1,4 +1,4 @@
-# Vision-Tuner: An Advanced Library for Fine-Tuning Vision Models
+# cnn_base: An Advanced Library for Fine-Tuning Vision Models
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.9+-blue.svg" alt="Python Version">
@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
 </p>
 
-**Vision-Tuner** is a high-level, research-focused library built on Keras 3 and TensorFlow 2 for rapidly fine-tuning, evaluating, and analyzing state-of-the-art image classification models.
+**cnn_base** is a high-level, research-focused library built on Keras 3 and TensorFlow 2 for rapidly fine-tuning, evaluating, and analyzing state-of-the-art image classification models.
 
 It moves beyond generic wrappers by providing specialized, architecture-aware classes for both **Convolutional Neural Networks (CNNs)** and **Vision Transformers (ViTs)**, enabling you to leverage advanced, model-specific fine-tuning techniques out of the box.
 
@@ -87,7 +87,7 @@ import numpy as np
 
 # 1. Load and preprocess your data
 # This will create a 'processed_data' directory with .npy files
-loader = DataLoader()
+loader = Data_Loader()
 loader.fetch_and_save_data(data_dir='path/to/your/dataset')
 X_train = np.load('processed_data/X_train.npy')
 y_train = np.load('processed_data/y_train.npy')
@@ -139,13 +139,13 @@ After training your model, use the `Visualizer` class to gain deep insights into
 ```python
 from cnn_base.utils import Visualizer
 from cnn_base.loggers import Logger
-from cnn_base.Models import CNN_Model, Transformer_Model
+from cnn_base.Models import CNN, Transformers
 import numpy as np
 
 # --- Setup -------------------------------------------------------------------
 # Assume you have these variables available after training your model:
 #
-# model: The trained model object (either a CNN_Model or Transformer_Model).
+# model: The trained model object (either a CNN or Transformers).
 # history: The history object returned by the model.fit() method.
 # X_test, y_test: Your test dataset and corresponding true labels.
 # class_names: A list of your class names, e.g., ['Cat', 'Dog'].
@@ -179,13 +179,13 @@ print("\n--- Plotting Model Interpretability ---")
 sample_image = X_test[0]
 
 # The library can use the best visualization method based on the model's architecture.
-if isinstance(model, CNN_Model):
+if isinstance(model, CNN):
     # For CNNs, Grad-CAM highlights the "hotspots" the model used for its decision.
     # The method automatically tries to find the last convolutional layer.
     print("Model is a CNN. Generating Grad-CAM...")
     visualizer.plot_grad_cam(model.model, sample_image)
 
-elif isinstance(model, Transformer_Model):
+elif isinstance(model, Transformers):
     # For Transformers, plotting the attention maps from the final block shows
     # which parts of the image the model "paid attention" to.
     print("Model is a Transformer. Generating Attention Maps...")
@@ -225,7 +225,7 @@ from cnn_base.Tune_Hyperparameters import tune, strategies
 
 # Use a predefined search space and strategy for Transformers
 tuner = tune(
-    strategy_function=strategies.transformer_fine_tuning_strategy_B,
+    strategy_function=strategies.strategy_B,
     search_space_fn=strategies.search_space_B,
     train_data=(X_train, y_train),
     validation_data=(X_val, y_val),
