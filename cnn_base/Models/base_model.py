@@ -125,14 +125,15 @@ class Base_Model(Keras_Model, ABC):
             Logger().error(f"Error loading model from {wrapper_path}: {e}")
             return None
 
-    def fit(self, train_data, validation_data, **kwargs):
+    def fit(self, x, y, validation_data : tuple = None, **kwargs):
         fit_config = self.config.training.model_dump()
         fit_config.update(kwargs)
         self.logger.info(f"Starting training for {fit_config['epochs']} epochs with batch size {fit_config['batch_size']}.")
         
         try:
             history = self.model.fit(
-                train_data,
+                x = x,
+                y = y,
                 validation_data=validation_data,
                 epochs=fit_config['epochs'],
                 batch_size=fit_config['batch_size'],

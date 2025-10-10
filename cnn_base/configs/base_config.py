@@ -23,9 +23,11 @@ PROJECT_ROOT = os.getcwd()
 STORAGE_DIR = os.path.join(PROJECT_ROOT, f"storage/{time.strftime("%d%m%Y_%H%M%S")}")
 MODEL_DIR = os.path.join(STORAGE_DIR, "models")
 LOG_DIR = os.path.join(STORAGE_DIR, "logs")
+RESULTS_DIR = os.path.join(STORAGE_DIR, "results")
 
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
 
 class Training_Config(BaseModel):
     batch_size: int = 32

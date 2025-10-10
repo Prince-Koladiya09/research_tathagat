@@ -56,7 +56,15 @@ class Data_Loader:
                 return sub_path
         return None
 
-    def fetch_and_save_data(self, data_dir: str, output_dir: str = "processed_data", image_size: tuple = (224, 224), mode: str = "RGB", random_state: int = 42):
+    def fetch_and_save_data(
+            self,
+            data_dir: str,
+            output_dir: str = "processed_data",
+            image_size: tuple = (224, 224),
+            mode: str = "RGB",
+            random_state: int = 42,
+            validation : float = 0.2,
+            test : float = 0.2):
         os.makedirs(output_dir, exist_ok=True)
         self.logger.info(f"Starting data processing from '{data_dir}' with image size {image_size}.")
 
@@ -68,31 +76,40 @@ class Data_Loader:
             self.logger.info(f"Found training folder: {train_dir}")
             X_train, y_train, class_names = self._process_folder(train_dir, image_size, mode)
             
-            if val_dir:
-                self.logger.info(f"Found validation folder: {val_dir}")
-                X_val, y_val, _ = self._process_folder(val_dir, image_size, mode)
-            else:
-                self.logger.warning("No validation folder found. Splitting train data 80/20 for train/validation.")
-                X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, stratify=y_train, random_state=random_state)
+            if validation :
+                if val_dir:
+                    self.logger.info(f"Found validation folder: {val_dir}")
+                    X_val, y_val, _ = self._process_folder(val_dir, image_size, mode)
+                else:
+                    self.logger.warning(f"No validation folder found. Splitting train data {(1 - validation) * 100}/{validation * 100} for train/validation.")
+                    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size = validation, stratify=y_train, random_state=random_state)
 
-            if test_dir:
-                self.logger.info(f"Found testing folder: {test_dir}")
-                X_test, y_test, _ = self._process_folder(test_dir, image_size, mode)
-            else:
-                self.logger.warning("No testing folder found. Test data will be empty.")
-                X_test, y_test = np.array([]), np.array([])
+            if test :
+                if test_dir:
+                    self.logger.info(f"Found testing folder: {test_dir}")
+                    X_test, y_test, _ = self._process_folder(test_dir, image_size, mode)
+                else:
+                    self.logger.warning(f"No testing folder found. Splitting train data {(1 - validation - test) * 100}/{test * 100} for train/test.")
+                    test_split = test / (1  - validation)
+                    X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size = test_split, stratify=y_train, random_state=random_state)
         else:
-            self.logger.info("No structured train/val/test folders found. Splitting data 60/20/20...")
-            X, y, class_names = self._process_folder(data_dir, image_size, mode)
-            X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.4, stratify=y, random_state=random_state)
-            X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=random_state)
+            self.logger.info(f"No structured train/val/test folders found. Splitting data {(1 - validation - test) * 100}/{validation * 100}/{test * 100}...")
+            X_train, y_train, class_names = self._process_folder(data_dir, image_size, mode)
+            if validation :
+                X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=validation, stratify=y_train, random_state=random_state)
+            if test :
+                test_split = test / (1  - validation)
+                X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size = test_split, stratify=y_train, random_state=random_state)
 
         data_splits = {
             'X_train': X_train, 'y_train': y_train,
-            'X_val': X_val, 'y_val': y_val,
             'X_test': X_test, 'y_test': y_test,
             'class_names': np.array(class_names)
         }
+        if validation :
+            data_splits.update({'X_val': X_val, 'y_val': y_val})
+        if test :
+            data_splits.update({'X_test': X_test, 'y_test': y_test})
 
         for name, data in data_splits.items():
             if data.size > 0:
@@ -100,6 +117,8 @@ class Data_Loader:
                 self.logger.info(f"Saved {name}.npy with shape: {data.shape}")
 
         self.logger.info(f"Data processing complete. Saved to '{output_dir}'.")
+
+        return data_splits
 
     @staticmethod
     def download_from_kaggle(path: str = None, dataset_name: str = "uraninjo/augmented-alzheimer-mri-dataset") -> str:

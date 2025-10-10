@@ -1,6 +1,7 @@
 import tensorflow as tf
 from typing import List
 import keras
+from keras.layers import GlobalAveragePooling2D, BatchNormalization, Dropout, Dense
 
 from ..base_model import Base_Model
 from .providers import get_model as get_cnn_layers
@@ -15,7 +16,15 @@ class Model(Base_Model):
         try:
             inputs, outputs = get_cnn_layers(name, img_size=self.config.model.img_size)
             self.base_model = keras.Model(inputs, outputs, name=name)
-            self.outputs_layer = self.base_model.output
+            self.freeze_all()
+
+            x = self.base_model.output
+            x = GlobalAveragePooling2D()(x)
+            x = BatchNormalization()(x)
+            x = Dense(128, activation = "relu")(x)
+            x = Dropout(0.3)(x)
+            x = Dense(self.config.model.num_classes, activation = "softmax")(x)
+            self.outputs_layer = x
             self._rebuild_model()
             self.logger.info(f"CNN base model '{name}' built successfully.")
         except Exception as e:
