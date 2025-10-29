@@ -10,8 +10,8 @@ from sklearn.metrics import (
 )
 import math
 import os
-from ..loggers import Logger
-from ..Models.base_model import Base_Model
+from cnn_base.loggers import Logger
+from cnn_base.Models.base_model import Base_Model
 
 
 class Visualizer:

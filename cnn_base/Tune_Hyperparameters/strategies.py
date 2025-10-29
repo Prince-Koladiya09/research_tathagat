@@ -1,5 +1,4 @@
-from ..Models import CNN
-from ..Models import Transformers
+from cnn_base.Models import CNN, Transformers
 
 """
 Two examples are given for search spaces and strategies

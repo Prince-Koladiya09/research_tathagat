@@ -1,4 +1,4 @@
-from .base_config import Global_Config, Optimizer_Config
+from cnn_base.configs.base_config import Global_Config, Optimizer_Config
 
 CNN_OPTIMIZER_CONFIG = Optimizer_Config(
     name="adam",

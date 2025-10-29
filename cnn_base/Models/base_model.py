@@ -6,11 +6,11 @@ from joblib import dump, load
 from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
-from ..loggers import Logger
-from ..configs.base_config import (
+from cnn_base.loggers import Logger
+from cnn_base.configs.base_config import (
     Global_Config, OPTIMIZERS, LR_SCHEDULERS, get_model_path, def_callbacks
 )
-from ..configs.cnn_config import DEFAULT_CNN_CONFIG
+from cnn_base.configs.cnn_config import DEFAULT_CNN_CONFIG
 
 class Base_Model(Keras_Model, ABC):
     def __init__(self, name: str = "base_model", config: Global_Config = None, **kwargs):

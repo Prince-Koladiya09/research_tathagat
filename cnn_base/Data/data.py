@@ -4,7 +4,7 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 import re
 import kagglehub
-from ..loggers import Logger
+from cnn_base.loggers import Logger
 
 class Data_Loader:
     def __init__(self, logger: Logger = None):

@@ -1,6 +1,6 @@
 import os
 import logging
-from ..configs.base_config import LOG_DIR
+from cnn_base.configs.base_config import LOG_DIR
 import re
 import time
 

@@ -3,10 +3,10 @@ from typing import List
 import keras
 from keras.layers import GlobalAveragePooling2D, BatchNormalization, Dropout, Dense
 
-from ..base_model import Base_Model
-from .providers import get_model as get_cnn_layers
-from ...configs.base_config import get_custom_layers
-from ...configs.cnn_config import DEFAULT_CNN_CONFIG
+from cnn_base.Models.base_model import Base_Model
+from cnn_base.Models.CNN.providers import get_model as get_cnn_layers
+from cnn_base.configs.base_config import get_custom_layers
+from cnn_base.configs.cnn_config import DEFAULT_CNN_CONFIG
 
 class Model(Base_Model):
     def __init__(self, name: str = "cnn_model", **kwargs):

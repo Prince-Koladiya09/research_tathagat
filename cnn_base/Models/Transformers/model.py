@@ -2,9 +2,9 @@ import tensorflow as tf
 import keras
 from keras.optimizers import AdamW
 
-from ..base_model import Base_Model
-from .providers import get_model as get_transformer_layers
-from ...configs.transformers_config import DEFAULT_TRANSFORMER_CONFIG
+from cnn_base.Models.base_model import Base_Model
+from cnn_base.Models.Transformers.providers import get_model as get_transformer_layers
+from cnn_base.configs.transformers_config import DEFAULT_TRANSFORMER_CONFIG
 
 class Model(Base_Model):
     def __init__(self, name: str = "transformer_model", **kwargs):

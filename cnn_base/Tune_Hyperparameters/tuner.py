@@ -3,9 +3,9 @@ import keras_tuner as kt
 import keras
 import os
 
-from ..Models import get_model
-from ..loggers import Logger
-from ..configs.base_config import STORAGE_DIR
+from cnn_base.Models import get_model
+from cnn_base.loggers import Logger
+from cnn_base.configs.base_config import STORAGE_DIR
 
 def save_tuner_results(tuner: kt.Tuner, project_name: str):
     logger = Logger(name=f"TunerSaver-{project_name}")

@@ -5,11 +5,11 @@ from typing import List, Union, Callable, Tuple
 import os
 import traceback
 
-from ..Models import get_model
-from ..Models.base_model import Base_Model
-from ..utils import Visualizer
-from ..loggers import Logger
-from ..configs.base_config import Global_Config, RESULTS_DIR
+from cnn_base.Models import get_model
+from cnn_base.Models.base_model import Base_Model
+from cnn_base.utils import Visualizer
+from cnn_base.loggers import Logger
+from cnn_base.configs.base_config import Global_Config, RESULTS_DIR
 
 def cnn_fine_tune_strategy(model: Base_Model, fine_tune_layers: int = 20):
     """Fine-tuning strategy for CNN models"""

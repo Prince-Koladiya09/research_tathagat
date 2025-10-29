@@ -1,8 +1,8 @@
-from ..loggers import Logger
-from .CNN import Model as CNN_Model
-from .Transformers import Model as Transformer_Model
-from .CNN.providers import _KERAS_MODEL_DICT as cnn_keras_models, _HUB_URLS as cnn_hub_models
-from .Transformers.providers import _HUB_URLS as transformer_hub_models
+from cnn_base.loggers import Logger
+from cnn_base.Models.CNN import Model as CNN_Model
+from cnn_base.Models.Transformers import Model as Transformer_Model
+from cnn_base.Models.CNN.providers import _KERAS_MODEL_DICT as cnn_keras_models, _HUB_URLS as cnn_hub_models
+from cnn_base.Models.Transformers.providers import _HUB_URLS as transformer_hub_models
 
 logger = Logger("Get_Model_Logger", "get_model_info.log", "get_model_error.log")
 
