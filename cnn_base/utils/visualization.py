@@ -168,21 +168,15 @@ class Visualizer:
         ```
         """
         try:
-            self.logger.debug(f"history : {history}")
-            self.logger.debug(f"history.history : {history.history}")
             acc = history.history.get("accuracy", [])
             val_acc = history.history.get("val_accuracy", [])
             loss = history.history.get("loss", [])
             val_loss = history.history.get("val_loss", [])
             params = {}
 
-            if len(metric) == 1 :
-                params[metric]["marker"] = "."
-                params[metric][linestyle] = ""
-
             plt.figure(figsize=(12, 5))
             plt.subplot(1, 2, 1)
-            plt.plot(acc, label="train acc", **params.get("accuracy", {}))
+            plt.plot(acc, label="train acc", marker=".", **params.get("accuracy", {}))
             if val_acc:
                 plt.plot(val_acc, label="val acc", **params.get("val_accuracy", {}))
             plt.legend()
@@ -357,7 +351,7 @@ class Visualizer:
                 loss = predictions[:, pred_index]
 
             grads = tape.gradient(loss, conv_outputs)[0]
-            pooled_grads = tf.reduce_mean(grads, axis=(0, 1))
+            pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
             heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1).numpy()
             heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
             
@@ -499,7 +493,7 @@ class Visualizer:
                         features_list.append(intermediate_layer_model.predict(x_batch))
                     features = np.concatenate(features_list, axis=0)
                 else:
-                    features = intermediate_layer_model.predict(data)
+                    features = intermediate_layer_model.predict(data, batch_size = 32   )
 
                 if len(features.shape) > 2:
                     features = features.reshape(features.shape[0], -1)
@@ -617,19 +611,21 @@ class Visualizer:
 
             explainer = shap.DeepExplainer(model, background_data)
 
-            shap_values = explainer.shap_values(images_to_explain)
-
             if len(images_to_explain.shape) == 3:
                 images_to_explain = np.expand_dims(images_to_explain, axis=0)
+
+            shap_values = explainer.shap_values(images_to_explain)
             
-            shap_values_transposed = [np.transpose(shap_values[i], (0, 2, 1, 3)) for i in range(len(shap_values))]
-            shap_values_for_plot = np.transpose(np.array(shap_values_transposed), (1, 2, 3, 4, 0))
+            # shap_values_transposed = [np.transpose(shap_values[i], (0, 2, 1, 3)) for i in range(len(shap_values))]
+            # shap_values_for_plot = np.transpose(np.array(shap_values_transposed), (1, 2, 3, 4, 0))
 
             plt.figure(figsize=(12, 8))
             
             shap.image_plot(
-                shap_values_for_plot,
-                -images_to_explain,  # SHAP expects the original image values
+                shap_values,
+                # shap_values_for_plot,
+                images_to_explain,  # Pass the original images, not negative ones
+                # -images_to_explain,  # SHAP expects the original image values
                 labels=np.array([class_names] * len(images_to_explain)) if class_names else None,
                 show = False
             )
@@ -707,10 +703,11 @@ class Visualizer:
                 filepath=os.path.join(fold_dir, "confidence_histogram.png")
             )
             
-            self.plot_cumulative_gain(
-                y_true, y_pred_prob[:, 1] if n_classes == 2 else y_pred_prob,
-                filepath=os.path.join(fold_dir, "cumulative_gain.png")
-            )
+            if n_classes == 2 :
+                self.plot_cumulative_gain(
+                    y_true, y_pred_prob[:, 1],
+                    filepath=os.path.join(fold_dir, "cumulative_gain.png")
+                )
             
             # Model-specific plots
             if cnn_model:
