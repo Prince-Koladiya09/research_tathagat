@@ -3,6 +3,7 @@ from cnn_base import Models
 from cnn_base.Data import Data_Loader
 from cnn_base.utils import Visualizer, devtools
 from cnn_base import Tune_Hyperparameters
+from cnn_base.Cross_Validation import Cross_Validator
 from cnn_base.configs.base_config import Global_Config
 
 __all__ = [
@@ -11,7 +12,7 @@ __all__ = [
     "Visualizer",
     "Models",
     "Tune_Hyperparameters",
-    "Cross_Validation",
+    "Cross_Validator",
     "devtools"
 ]
 
