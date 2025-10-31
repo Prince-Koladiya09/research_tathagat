@@ -191,16 +191,15 @@ class Cross_Validator:
             self.logger.error(f"Error creating visualizations for {model_name} fold {fold_num}: {e}")
 
     def _aggregate_results(self, model_name: str, fold_results: List[dict]) -> pd.DataFrame:
-        df_folds = pd.DataFrame(fold_results)
+        df_folds = pd.DataFrame(fold["metrics"] for fold in fold_results)
         
         # Calculate mean and std for each metric
         summary = {'model': model_name}
         for col in df_folds.columns:
-            if col not in ['fold', 'model']:
-                summary[f'mean_{col}'] = df_folds[col].mean()
-                summary[f'std_{col}'] = df_folds[col].std()
-                summary[f'min_{col}'] = df_folds[col].min()
-                summary[f'max_{col}'] = df_folds[col].max()
+            summary[f'mean_{col}'] = df_folds[col].mean()
+            summary[f'std_{col}'] = df_folds[col].std()
+            summary[f'min_{col}'] = df_folds[col].min()
+            summary[f'max_{col}'] = df_folds[col].max()
 
         self.logger.info(f"Aggregated results for {model_name}: {summary}")
         return pd.DataFrame([summary])
