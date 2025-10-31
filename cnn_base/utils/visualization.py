@@ -3,7 +3,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from keras import layers
 import tensorflow as tf
+
 from sklearn.metrics import (
     confusion_matrix, roc_curve, auc, precision_recall_curve,
     average_precision_score, classification_report
@@ -391,7 +393,7 @@ class Visualizer:
             outputs = [layer.output for layer in model.layers if "attention" in layer.name.lower() and hasattr(layer, 'attention_scores')]
             
             if not outputs:
-                 outputs = [layer.output for layer in model.layers if isinstance(layer, tf.keras.layers.MultiHeadAttention)]
+                 outputs = [layer.output for layer in model.layers if isinstance(layer, layers.MultiHeadAttention)]
 
             if not outputs:
                 self.logger.error("Could not find any attention layers in the model.")
@@ -720,8 +722,8 @@ class Visualizer:
                 self._create_xai_plots(model_wrapper, X_val, fold_dir, background_data, class_names)
             
             # Embedding plots
-            if create_embedding_plots:
-                self._create_embedding_plots(model_wrapper, X_val, y_true, fold_dir)
+            # if create_embedding_plots:
+            #     self._create_embedding_plots(model_wrapper, X_val, y_true, fold_dir)
                 
             self.logger.info(f"All plots saved to {fold_dir}")
             
@@ -738,7 +740,7 @@ class Visualizer:
                 
                 # Find convolutional layers for Grad-CAM
                 conv_layers = [layer.name for layer in model_wrapper.model.layers 
-                             if isinstance(layer, tf.keras.layers.Conv2D)]
+                             if isinstance(layer, layers.Conv2D)]
                 
                 if conv_layers:
                     last_conv_layer = conv_layers[-1]
@@ -778,13 +780,13 @@ class Visualizer:
                     filepath=os.path.join(fold_dir, "lime_explanation.png")
                 )
                 
-                # SHAP explanations (use a small subset for performance)
-                if background_data is not None and len(X_val) >= 3:
-                    shap_samples = X_val[:3]  # Use first 3 samples for SHAP
-                    self.plot_shap_explanation(
-                        model_wrapper.model, background_data, shap_samples, class_names,
-                        filepath=os.path.join(fold_dir, "shap_explanation.png")
-                    )
+                # # SHAP explanations (use a small subset for performance)
+                # if background_data is not None and len(X_val) >= 3:
+                #     shap_samples = X_val[:3]  # Use first 3 samples for SHAP
+                #     self.plot_shap_explanation(
+                #         model_wrapper.model, background_data, shap_samples, class_names,
+                #         filepath=os.path.join(fold_dir, "shap_explanation.png")
+                #     )
                     
         except Exception as e:
             self.logger.warning(f"Could not create XAI plots: {e}")
@@ -796,11 +798,14 @@ class Visualizer:
                 # Try to find suitable layers for embedding extraction
                 embedding_layers = []
                 for layer in model_wrapper.model.layers:
-                    layer_name = layer.name.lower()
+                    # layer_name = layer.name.lower()
                     # Look for dense, embedding, or flatten layers
-                    if any(keyword in layer_name for keyword in ['dense', 'embedding', 'flatten', 'global']):
-                        if len(layer.output_shape) == 2:  # 2D output suitable for embeddings
-                            embedding_layers.append(layer.name)
+                    if isinstance(layer, (layers.Dense, layers.Embedding, layers.Flatten, layers.GlobalAveragePooling1D, layers.GlobalAveragePooling2D)):
+                        try :
+                            if len(layer.output_shape) == 2:  # 2D output suitable for embeddings
+                                embedding_layers.append(layer.name)
+                        except :
+                            pass
                 
                 if embedding_layers:
                     # Use the last suitable layer

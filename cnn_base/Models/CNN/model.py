@@ -20,7 +20,6 @@ class Model(Base_Model):
 
             self.outputs_layer = self.base_model.output
             self.add_custom_layers()
-            self._rebuild_model()
             self.compile()
             self.logger.info(f"CNN base model '{name}' built successfully.")
         except Exception as e:

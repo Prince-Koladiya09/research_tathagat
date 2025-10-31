@@ -5,7 +5,7 @@ from typing import List, Union, Callable, Tuple
 import os
 import traceback
 
-from cnn_base.Models import get_model
+from cnn_base.Models import get_model, get_all_models
 from cnn_base.Models.base_model import Base_Model
 from cnn_base.utils import Visualizer
 from cnn_base.loggers import Logger
@@ -46,7 +46,6 @@ class Cross_Validator:
     def __init__(self, model_names: Union[str, List[str]], n_splits: int = 5,
                  logger: Logger = None, class_names: List[str] = None,
                  create_xai_plots: bool = True, create_embedding_plots: bool = True):
-        self.model_names = [model_names] if isinstance(model_names, str) else model_names
         self.n_splits = n_splits
         self.logger = logger if logger else Logger("Cross_Validation_Logger", "cv_info.log", "cv_error.log")
         self.output = RESULTS_DIR
@@ -54,6 +53,10 @@ class Cross_Validator:
         self.create_xai_plots = create_xai_plots
         self.create_embedding_plots = create_embedding_plots
         self.results = pd.DataFrame()
+
+        if model_names == "all" :
+            self.model_names = get_all_models()[0] # temporary testing all CNN models
+        self.model_names = [model_names] if isinstance(model_names, str) else model_names
         
         # Initialize visualizer
         self.visualizer = Visualizer(logger=self.logger)
@@ -73,7 +76,7 @@ class Cross_Validator:
         background_data = background_data or X[:min(100, len(X))]
 
         all_results = []
-        
+
         for model_name in self.model_names:
             self.logger.info(f"--- Validating model: {model_name} ---")
             fold_results = []

@@ -6,11 +6,13 @@ from cnn_base.Models.Transformers.providers import _HUB_URLS as transformer_hub_
 
 logger = Logger("Get_Model_Logger", "get_model_info.log", "get_model_error.log")
 
+def get_all_models() -> list[str] :
+    return list(cnn_keras_models.keys()) + list(cnn_hub_models.keys()), list(transformer_hub_models.keys())
+
 def get_model(model_name: str, **kwargs):
     clean_name = model_name.lower().replace('-', '_').replace(' ', '_')
 
-    cnn_models = list(cnn_keras_models.keys()) + list(cnn_hub_models.keys())
-    transformer_models = list(transformer_hub_models.keys())
+    cnn_models, transformer_models = get_all_models()
 
     if clean_name in  cnn_models:
         logger.info(f"'{model_name}' identified as a CNN. Instantiating CNN_Model.")

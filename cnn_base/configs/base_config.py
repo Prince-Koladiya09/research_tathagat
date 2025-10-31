@@ -38,7 +38,7 @@ class Model_Config(BaseModel):
 
 class Training_Config(BaseModel):
     batch_size: int = 32
-    epochs: int = 1
+    epochs: int = 10
     seed: int = 42
     loss: str = "sparse_categorical_crossentropy"
     metrics : List[Any] = Field(default_factory=list)
