@@ -45,13 +45,26 @@ def get_fine_tune_strategy(model_type: str):
 class Cross_Validator:
     def __init__(self, model_names: Union[str, List[str]], n_splits: int = 5,
                  logger: Logger = None, class_names: List[str] = None,
-                 create_xai_plots: bool = True, create_embedding_plots: bool = True):
+                 create_xai_plots: bool = True, create_embedding_plots: bool = True,
+                 update_config_dict : dict[str, dict] = None):
+        """
+        Example for update_config_dict :
+        ```python
+        update_config_dict = {
+            "training" : {
+                "epochs" : 10
+            }
+        }
+        ```
+        """
         self.n_splits = n_splits
         self.logger = logger if logger else Logger("Cross_Validation_Logger", "cv_info.log", "cv_error.log")
         self.output = RESULTS_DIR
         self.class_names = class_names
         self.create_xai_plots = create_xai_plots
         self.create_embedding_plots = create_embedding_plots
+        self.create_embedding_plots = create_embedding_plots
+        self.update_config_dict = update_config_dict
         self.results = pd.DataFrame()
 
         if model_names == "all" :
@@ -100,6 +113,9 @@ class Cross_Validator:
                     fine_tune_strategy = fine_tune_strategy or cnn_fine_tune_strategy
                     self.logger.info(f"Applying fine-tuning on {fine_tune_layers} layers...")
                     model = fine_tune_strategy(model, fine_tune_layers)
+
+                    if self.update_config_dict :
+                        model.update_config(self.update_config_dict)
                     
                     if summary :
                         model.summary()
