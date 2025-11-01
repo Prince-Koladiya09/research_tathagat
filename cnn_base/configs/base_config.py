@@ -104,8 +104,7 @@ LR_SCHEDULERS = {
 }
 
 def get_model_path(model_name: str, extension: str = "keras") -> str:
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    filename = f"{model_name}_{timestamp}.{extension}"
+    filename = f"{model_name}.{extension}"
     return os.path.join(MODEL_DIR, filename)
 
 def def_callbacks(logger, model_name: str) -> list:
