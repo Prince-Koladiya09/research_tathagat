@@ -153,3 +153,13 @@ def create_default_metrics(num_classes : int) -> list[keras.metrics.Metric] :
         get_recall(num_classes=num_classes, name="recall"), 
         get_auc(num_classes=num_classes, name="auc")
     ]
+
+def save_data(save_dir : str = None) :
+    path = save_dir or os.getcwd()
+    import zipfile
+
+    with zipfile.ZipFile(f"storage__{os.path.basename(STORAGE_DIR)}.zip", "w", zipfile.ZIP_DEFLATED) as f :
+        for root, _, files in os.walk(STORAGE_DIR) :
+            print(root, files)
+            for file in files :
+                f.write(os.path.join(root, file), file)

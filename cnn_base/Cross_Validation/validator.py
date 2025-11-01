@@ -4,6 +4,8 @@ import numpy as np
 from typing import List, Union, Callable, Tuple
 import os
 import traceback
+import keras
+import gc
 
 from cnn_base.Models import get_model, get_all_models
 from cnn_base.Models.base_model import Base_Model
@@ -104,6 +106,7 @@ class Cross_Validator:
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
 
+                model = None
                 try:
                     # Get model instance using get_model
                     self.logger.info(f"Initializing model {model_name} using get_model...")
@@ -146,7 +149,7 @@ class Cross_Validator:
                             metric_names = ['loss'] + [f'metric_{i}' for i in range(len(eval_metrics)-1)]
                         metric_dict = {name: val for name, val in zip(metric_names, eval_metrics)}
                     else:
-                        metric_dict = {'metrics': eval_metrics}
+                        metric_dict = eval_metrics
                     
                     metric_dict['fold'] = fold + 1
                     metric_dict['model'] = model_name
@@ -161,7 +164,14 @@ class Cross_Validator:
                     self.logger.error(f"Error in fold {fold + 1} for model {model_name}: {e}")
                     self.logger.error(traceback.format_exc())
                     continue
-            
+
+                finally :
+                    if model :
+                        del model
+                    
+                    keras.backend.clear_session()
+                    gc.collect()
+                    self.logger.info(f"Cleaned up memory after fold {fold + 1}.")
 
             # Aggregate results for current model
             if fold_results:
@@ -207,11 +217,13 @@ class Cross_Validator:
             self.logger.error(f"Error creating visualizations for {model_name} fold {fold_num}: {e}")
 
     def _aggregate_results(self, model_name: str, fold_results: List[dict]) -> pd.DataFrame:
-        df_folds = pd.DataFrame(fold["metrics"] for fold in fold_results)
+        df_folds = pd.DataFrame(fold_results)
+
+        metric_cols = [col for col in df_folds.columns if col not in ['fold', 'model']]
         
         # Calculate mean and std for each metric
         summary = {'model': model_name}
-        for col in df_folds.columns:
+        for col in metric_cols :
             summary[f'mean_{col}'] = df_folds[col].mean()
             summary[f'std_{col}'] = df_folds[col].std()
             summary[f'min_{col}'] = df_folds[col].min()
