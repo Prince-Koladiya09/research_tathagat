@@ -1,0 +1,2971 @@
+--- START OF FILE setup.py ---
+
+from setuptools import setup, find_packages
+
+setup(
+    name="adv_image_finetune",
+    version="0.2.0",
+    description="An advanced library for fine-tuning image classification models.",
+    author="Meet Vyas, Prince Koladiya",
+    packages=find_packages(),
+    install_requires=[
+        "tensorflow>=2.12",
+        "keras>=2.12",
+        "numpy",
+        "pandas",
+        "matplotlib",
+        "seaborn",
+        "scikit-learn",
+        "kagglehub",
+        "pillow",
+        "pydantic",
+        "tensorflow_hub",
+        "joblib"
+    ],
+    extras_require={
+        "viz": [
+            "opencv-python>=4.8.0",
+            "umap-learn>=0.5.4",
+            "plotly>=5.16.0",
+            "lime",
+            "shap",
+        ]
+    },
+    python_requires=">=3.8",
+)
+
+--- END OF FILE setup.py ---
+
+
+--- START OF FILE requirements.txt ---
+
+tensorflow>=2.12
+keras>=2.12
+numpy
+matplotlib
+pandas
+seaborn
+scikit-learn
+kagglehub
+pillow
+keras_tuner
+pydantic
+tensorflow_hub
+torch
+torchvision
+timm
+
+# Extras
+# For Grad-CAM visualization
+opencv-python>=4.8.0
+# For embeddings and dimensionality reduction
+umap-learn>=0.5.4
+plotly>=5.16.0
+# For LIME and SHAP Visualizations
+lime
+shap
+
+--- END OF FILE requirements.txt ---
+
+
+--- START OF FILE cnn_base/__init__.py ---
+
+from cnn_base.loggers.logger import Logger
+from cnn_base import Models
+from cnn_base.Data import Data_Loader
+from cnn_base.utils import Visualizer, devtools
+from cnn_base import Tune_Hyperparameters
+from cnn_base.Cross_Validation import Cross_Validator
+from cnn_base.configs.base_config import Global_Config
+
+__all__ = [
+    "Logger",
+    "Data_Loader",
+    "Visualizer",
+    "Models",
+    "Tune_Hyperparameters",
+    "Cross_Validator",
+    "devtools"
+]
+
+if Global_Config.edit_mode :
+    try :
+        devtools.enable_autoreload()
+    except Exception as e :
+        pass
+
+--- END OF FILE cnn_base/__init__.py ---
+
+
+--- START OF FILE cnn_base/configs/__init__.py ---
+
+--- END OF FILE cnn_base/configs/__init__.py ---
+
+
+--- START OF FILE cnn_base/configs/base_config.py ---
+
+import os
+import time
+from typing import List, Tuple, Any, Dict, Optional, ClassVar
+
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
+import keras
+from keras import layers
+from keras.optimizers import (
+    Adam, AdamW, Nadam, Adagrad, Adamax, Adadelta,
+    SGD, RMSprop, Lamb, Lion
+)
+from keras.optimizers.schedules import (
+    ExponentialDecay, PiecewiseConstantDecay, InverseTimeDecay,
+    PolynomialDecay, CosineDecay
+)
+from .metrics import (
+    get_accuracy, get_precision, get_recall, get_auc
+)
+from keras.callbacks import (
+    ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+)
+
+PROJECT_ROOT = os.getcwd()
+STORAGE_DIR = os.path.join(PROJECT_ROOT, f"storage/{time.strftime('%d%m%Y_%H%M%S')}")
+MODEL_DIR = os.path.join(STORAGE_DIR, "models")
+LOG_DIR = os.path.join(STORAGE_DIR, "logs")
+RESULTS_DIR = os.path.join(STORAGE_DIR, "results")
+
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+class Model_Config(BaseModel):
+    num_classes: int = 4
+    img_size: Tuple[int, int] = (224, 224)
+    n_layers_to_tune: int = 0
+    n_layers_to_remove: int = 1
+
+class Training_Config(BaseModel):
+    batch_size: int = 32
+    epochs: int = 25
+    seed: int = 42
+    loss: str = "sparse_categorical_crossentropy"
+    metrics : List[Any] = Field(default_factory=list)
+    model_config = ConfigDict(arbitrary_types_allowed = True)
+
+    @field_serializer("metrics")
+    def serialize_metrics(self, metrics, _info) -> List[str] :
+        return [m.name if hasattr(m, "name") else str(m) for m in metrics]
+
+class Optimizer_Config(BaseModel):
+    name: str = "adam"
+    params: Dict[str, Any] = {}
+    learning_rate: float = 1e-3
+    scheduler_name: Optional[str] = None
+    scheduler_params: Dict[str, Any] = {}
+    model_config = ConfigDict(arbitrary_types_allowed = True)
+
+class Global_Config(BaseModel):
+    edit_mode: ClassVar[bool] = True
+    training: Training_Config = Field(default_factory=Training_Config)
+    model: Model_Config = Field(default_factory=Model_Config)
+    optimizer: Optimizer_Config = Field(default_factory=Optimizer_Config)
+
+    def __init__(self, **data) :
+        super().__init__(**data)
+        if not self.training.metrics :
+            self.training.metrics = create_default_metrics(self.model.num_classes)
+
+OPTIMIZERS = {
+    "adam": {"class": Adam, "params": {}},
+    "adamw": {"class": AdamW, "params": {"weight_decay": 1e-5}},
+    "sgd": {"class": SGD, "params": {"momentum": 0.9}},
+    "rmsprop": {"class": RMSprop, "params": {"momentum": 0.9}},
+    "nadam": {"class": Nadam, "params": {}},
+    "adagrad": {"class": Adagrad, "params": {}},
+    "adadelta": {"class": Adadelta, "params": {}},
+    "adamax": {"class": Adamax, "params": {}},
+    "lamb": {"class": Lamb, "params": {}},
+    "lion": {"class": Lion, "params": {}},
+}
+
+LR_SCHEDULERS = {
+    "exponential_decay": {
+        "class": ExponentialDecay,
+        "params": {"decay_steps": 10000, "decay_rate": 0.9, "staircase": True}
+    },
+    "piecewise_constant_decay": {
+        "class": PiecewiseConstantDecay,
+        "params": {"boundaries": [10000, 20000], "values": [1e-3, 0.5e-3, 0.1e-3]}
+    },
+    "polynomial_decay": {
+        "class": PolynomialDecay,
+        "params": {"decay_steps": 10000, "end_learning_rate": 1e-5, "power": 1.0}
+    },
+    "inverse_time_decay": {
+        "class": InverseTimeDecay,
+        "params": {"decay_steps": 1.0, "decay_rate": 0.5}
+    },
+    "cosine_decay": {
+        "class": CosineDecay,
+        "params": {"decay_steps": 10000}
+    }
+}
+
+def get_model_path(model_name: str, extension: str = "keras") -> str:
+    filename = f"{model_name}.{extension}"
+    return os.path.join(MODEL_DIR, filename)
+
+def def_callbacks(logger, model_name: str) -> list:
+    try:
+        model_path = get_model_path(f"best_{model_name}")
+        model_checkpoint = ModelCheckpoint(
+            filepath=model_path,
+            save_best_only=True,
+            monitor="val_loss",
+            mode="min",
+            verbose=1
+        )
+        early_stopping = EarlyStopping(
+            monitor="val_loss",
+            patience=10,
+            verbose=1,
+            mode="min",
+            restore_best_weights=True
+        )
+        reduce_lr = ReduceLROnPlateau(
+            monitor="val_loss",
+            factor=0.2,
+            patience=5,
+            min_lr=1e-6,
+            mode="min",
+            verbose=1
+        )
+        callbacks = [model_checkpoint, early_stopping, reduce_lr]
+        logger.info(f"Default callbacks defined successfully. Best model will be saved to {model_path}")
+        return callbacks
+    except Exception as e:
+        logger.error(f"Error defining callbacks: {e}")
+        return []
+
+def get_custom_layers(num_classes: int, dropout_rate: float = 0.3) -> list:
+    return [
+        layers.GlobalAveragePooling2D(),
+        layers.Dropout(dropout_rate),
+        layers.Dense(num_classes, activation="softmax")
+    ]
+
+def create_default_metrics(num_classes : int) -> list[keras.metrics.Metric] :
+    return [
+        get_accuracy(num_classes = num_classes, name="accuracy"),
+        get_precision(num_classes=num_classes, name="precision"),
+        get_recall(num_classes=num_classes, name="recall"), 
+        get_auc(num_classes=num_classes, name="auc")
+    ]
+
+def save_data(save_dir : str = None) :
+    import zipfile
+
+    with zipfile.ZipFile(f"storage__{os.path.basename(STORAGE_DIR)}.zip", "w", zipfile.ZIP_DEFLATED) as f :
+        for root, _, files in os.walk(STORAGE_DIR) :
+            print(root, files)
+            for file in files :
+                f.write(os.path.join(root, file), file)
+
+--- END OF FILE cnn_base/configs/base_config.py ---
+
+
+--- START OF FILE cnn_base/configs/cnn_config.py ---
+
+from cnn_base.configs.base_config import Global_Config, Optimizer_Config
+
+CNN_OPTIMIZER_CONFIG = Optimizer_Config(
+    name="adam",
+    learning_rate=1e-3,
+    # scheduler_name="cosine_decay"
+)
+
+DEFAULT_CNN_CONFIG = Global_Config(
+    optimizer=CNN_OPTIMIZER_CONFIG
+)
+
+--- END OF FILE cnn_base/configs/cnn_config.py ---
+
+
+--- START OF FILE cnn_base/configs/transformers_config.py ---
+
+from cnn_base.configs.base_config import Global_Config, Optimizer_Config
+
+TRANSFORMER_OPTIMIZER_CONFIG = Optimizer_Config(
+    name="adamw",
+    learning_rate=5e-5,
+    params={"weight_decay": 0.01}
+)
+
+DEFAULT_TRANSFORMER_CONFIG = Global_Config(
+    optimizer=TRANSFORMER_OPTIMIZER_CONFIG
+)
+
+--- END OF FILE cnn_base/configs/transformers_config.py ---
+
+
+--- START OF FILE cnn_base/configs/metrics/__init__.py ---
+
+from .accuracy import get_accuracy
+from .precision import Precision, get_precision
+from .recall import Recall, get_recall
+from .auc import AUC, get_auc
+
+__all__ = ["get_accuracy", "Precision", "get_precision", "Recall", "get_recall", "AUC", "get_auc"]
+
+--- END OF FILE cnn_base/configs/metrics/__init__.py ---
+
+
+--- START OF FILE cnn_base/configs/metrics/accuracy.py ---
+
+from keras.metrics import Accuracy, SparseCategoricalAccuracy
+
+def get_accuracy(name : str = "accuracy", num_classes : int = 4) :
+    if num_classes > 2 :
+        return SparseCategoricalAccuracy(name)
+    else :
+        return Accuracy(name)
+
+--- END OF FILE cnn_base/configs/metrics/accuracy.py ---
+
+
+--- START OF FILE cnn_base/configs/metrics/auc.py ---
+
+import tensorflow as tf
+from keras.metrics import Metric, AUC as Keras_AUC
+from keras.saving import register_keras_serializable
+
+@register_keras_serializable()
+class AUC(Metric):
+    def __init__(self, num_classes, name='multi_class_auc', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.num_classes = num_classes
+        # Create an AUC metric for each class
+        self.auc_per_class = [Keras_AUC(name=f'auc_class_{i}') for i in range(num_classes)]
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        # y_true is sparse (batch,), y_pred is (batch, num_classes)
+        # Convert y_true to one-hot
+        y_true_one_hot = tf.one_hot(tf.cast(y_true, tf.int32), self.num_classes)
+        for i in range(self.num_classes):
+            self.auc_per_class[i].update_state(y_true_one_hot[:, i], y_pred[:, i], sample_weight)
+
+    def result(self):
+        aucs = [m.result() for m in self.auc_per_class]
+        # Macro-average AUC
+        return tf.reduce_mean(aucs)
+
+    def reset_states(self):
+        for m in self.auc_per_class:
+            m.reset_states()
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "num_classes": self.num_classes,
+        })
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
+def get_auc(name : str = "recall", num_classes : int = 4) -> Metric :
+    if num_classes > 2 :
+        return AUC(name = name, num_classes = num_classes)
+    else :
+        return Keras_AUC(name = "recall")
+
+--- END OF FILE cnn_base/configs/metrics/auc.py ---
+
+
+--- START OF FILE cnn_base/configs/metrics/precision.py ---
+
+import tensorflow as tf
+from keras.metrics import Metric, Precision as Keras_Precision
+from keras.saving import register_keras_serializable
+
+@register_keras_serializable()
+class Precision(Metric):
+    def __init__(self, num_classes, name='multi_class_precision', **kwargs):
+        super().__init__(name=name, **kwargs)
+
+        self.num_classes = num_classes
+        self.true_positives = self.add_weight(name = 'true_positives', initializer='zeros')
+        self.false_positives = self.add_weight(name = 'false_positives', initializer='zeros')
+        
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        # Convert predictions from probabilities to class indices
+        y_pred_classes = tf.argmax(y_pred, axis=-1)
+        y_true_classes = tf.argmax(y_true, axis=-1)
+        
+        # Create one-hot encodings
+        y_pred_oh = tf.one_hot(y_pred_classes, depth=self.num_classes)
+        y_true_oh = tf.one_hot(y_true_classes, depth=self.num_classes)
+        
+        # Calculate true positives and false positives
+        tp = tf.cast(tf.reduce_sum(y_true_oh * y_pred_oh), tf.float32)
+        fp = tf.cast(tf.reduce_sum((1 - y_true_oh) * y_pred_oh), tf.float32)
+        
+        self.true_positives.assign_add(tp)
+        self.false_positives.assign_add(fp)
+        
+    def result(self):
+        precision = self.true_positives / (self.true_positives + self.false_positives + tf.keras.backend.epsilon())
+        return precision
+    
+    def reset_states(self):
+        self.true_positives.assign(0.)
+        self.false_positives.assign(0.)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "num_classes": self.num_classes,
+        })
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
+def get_precision(name : str = "precision", num_classes : int = 4) -> Metric :
+    if num_classes > 2 :
+        return Precision(name = name, num_classes = num_classes)
+    else :
+        return Keras_Precision(name = name)
+
+--- END OF FILE cnn_base/configs/metrics/precision.py ---
+
+
+--- START OF FILE cnn_base/configs/metrics/recall.py ---
+
+import tensorflow as tf
+from keras.metrics import Metric, Recall as Keras_Recall
+from keras.saving import register_keras_serializable
+
+@register_keras_serializable()
+class Recall(Metric):
+    def __init__(self, num_classes, name='multi_class_recall', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.num_classes = num_classes
+        self.true_positives = self.add_weight(name = 'true_positives', initializer='zeros')
+        self.false_negatives = self.add_weight(name = 'false_negatives', initializer='zeros')
+        
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        # Convert predictions from probabilities to class indices
+        y_pred_classes = tf.argmax(y_pred, axis=-1)
+        y_true_classes = tf.argmax(y_true, axis=-1)
+        
+        # Create one-hot encodings
+        y_pred_oh = tf.one_hot(y_pred_classes, depth=self.num_classes)
+        y_true_oh = tf.one_hot(y_true_classes, depth=self.num_classes)
+        
+        # Calculate true positives and false negatives
+        tp = tf.cast(tf.reduce_sum(y_true_oh * y_pred_oh), tf.float32)
+        fn = tf.cast(tf.reduce_sum(y_true_oh * (1 - y_pred_oh)), tf.float32)
+        
+        self.true_positives.assign_add(tp)
+        self.false_negatives.assign_add(fn)
+        
+    def result(self):
+        recall = self.true_positives / (self.true_positives + self.false_negatives + tf.keras.backend.epsilon())
+        return recall
+    
+    def reset_states(self):
+        self.true_positives.assign(0.)
+        self.false_negatives.assign(0.)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "num_classes": self.num_classes,
+        })
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
+def get_recall(name : str = "recall", num_classes : int = 4) -> Metric :
+    if num_classes > 2 :
+        return Recall(name = name, num_classes = num_classes)
+    else :
+        return Keras_Recall(name = "recall")
+
+--- END OF FILE cnn_base/configs/metrics/recall.py ---
+
+
+--- START OF FILE cnn_base/Cross_Validation/__init__.py ---
+
+from cnn_base.Cross_Validation.validator import Cross_Validator
+
+__all__ = [
+    "Cross_Validator"
+]
+
+--- END OF FILE cnn_base/Cross_Validation/__init__.py ---
+
+
+--- START OF FILE cnn_base/Cross_Validation/validator.py ---
+
+import pandas as pd
+from sklearn.model_selection import StratifiedKFold
+import numpy as np
+from typing import List, Union, Callable, Tuple
+import os
+import traceback
+import keras
+import gc
+
+from cnn_base.Models import get_model, get_all_models
+from cnn_base.Models.base_model import Base_Model
+from cnn_base.utils import Visualizer
+from cnn_base.loggers import Logger
+from cnn_base.configs.base_config import Global_Config, RESULTS_DIR
+
+def cnn_fine_tune_strategy(model: Base_Model, fine_tune_layers: int = 20):
+    """Fine-tuning strategy for CNN models"""
+    try:
+        if hasattr(model, 'unfreeze_later_n'):
+            model.unfreeze_later_n(fine_tune_layers)
+        model.compile()
+        return model
+    except Exception as e:
+        model.logger.error(f"Error in CNN fine-tuning: {e}")
+        return model
+
+def transformer_fine_tune_strategy(model: Base_Model, fine_tune_layers: int = 2):
+    """Fine-tuning strategy for Transformer models"""
+    try:
+        if hasattr(model, 'unfreeze_last_n_blocks'):
+            model.unfreeze_last_n_blocks(fine_tune_layers)
+        elif hasattr(model, 'freeze_patch_embeddings'):
+            model.freeze_patch_embeddings()
+        model.compile()
+        return model
+    except Exception as e:
+        model.logger.error(f"Error in Transformer fine-tuning: {e}")
+        return model
+
+def get_fine_tune_strategy(model_type: str):
+    """Get appropriate fine-tuning strategy based on model type"""
+    if 'transformer' in model_type.lower() or 'vit' in model_type.lower():
+        return transformer_fine_tune_strategy
+    else:
+        return cnn_fine_tune_strategy
+
+class Cross_Validator:
+    def __init__(self, model_names: Union[str, List[str]], n_splits: int = 5,
+                 logger: Logger = None, class_names: List[str] = None,
+                 create_xai_plots: bool = True, create_embedding_plots: bool = True,
+                 update_config_dict : dict[str, dict] = None):
+        """
+        Example for update_config_dict :
+        ```python
+        update_config_dict = {
+            "training" : {
+                "epochs" : 10
+            }
+        }
+        ```
+        """
+        self.n_splits = n_splits
+        self.logger = logger if logger else Logger("Cross_Validation_Logger", "cv_info.log", "cv_error.log")
+        self.output = RESULTS_DIR
+        self.class_names = class_names
+        self.create_xai_plots = create_xai_plots
+        self.create_embedding_plots = create_embedding_plots
+        self.create_embedding_plots = create_embedding_plots
+        self.update_config_dict = update_config_dict
+        self.results = pd.DataFrame()
+
+        if model_names == "all" :
+            self.model_names = get_all_models()[0] # temporary testing all CNN models
+        self.model_names = [model_names] if isinstance(model_names, str) else model_names
+        
+        # Initialize visualizer
+        self.visualizer = Visualizer(logger=self.logger)
+
+    def run(self, 
+            X: np.ndarray, 
+            y: np.ndarray,
+            fine_tune_strategy: Callable[[Base_Model], None] = None,
+            fine_tune_layers: int = None,
+            summary : bool = False,
+            background_data: np.ndarray = None) -> pd.DataFrame:
+                
+        self.logger.info(f"Starting {self.n_splits}-fold cross-validation for models: {self.model_names}")
+        skf = StratifiedKFold(n_splits=self.n_splits, shuffle=True, 
+                            random_state=Global_Config().training.seed)
+        
+        background_data = background_data or X[:min(100, len(X))]
+
+        all_results = []
+
+        for model_name in self.model_names:
+            self.logger.info(f"--- Validating model: {model_name} ---")
+            fold_results = []
+
+            model_dir = os.path.join(self.output, model_name)
+            graphs_dir = os.path.join(model_dir, "graphs")
+            os.makedirs(model_dir, exist_ok = True)
+            os.makedirs(graphs_dir, exist_ok = True)
+            
+            for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+                self.logger.info(f"--- Fold {fold + 1}/{self.n_splits} ---")
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+
+                model = None
+                try:
+                    # Get model instance using get_model
+                    self.logger.info(f"Initializing model {model_name} using get_model...")
+                    model : Base_Model = get_model(model_name)
+
+                    fine_tune_layers = fine_tune_layers or model.config.model.n_layers_to_tune
+                    fine_tune_strategy = fine_tune_strategy or cnn_fine_tune_strategy
+                    self.logger.info(f"Applying fine-tuning on {fine_tune_layers} layers...")
+                    model = fine_tune_strategy(model, fine_tune_layers)
+
+                    if self.update_config_dict :
+                        model.update_config(self.update_config_dict)
+                    
+                    if summary :
+                        model.summary()
+
+                    # Train the model
+                    self.logger.info(f"Starting training for {model.config.training.epochs} epochs...")
+                    history = model.fit(
+                        x=X_train,
+                        y=y_train,
+                        validation_data=(X_val, y_val),
+                        verbose=0
+                    )
+                    
+                    # Evaluate the model
+                    self.logger.info("Evaluating model...")
+                    eval_metrics = model.evaluate(
+                        X = X_val,
+                        y = y_val,
+                        verbose=0
+                        )
+                    
+                    if isinstance(eval_metrics, (list, tuple)):
+                        # Get metric names from the compiled model
+                        if hasattr(model, 'config') and hasattr(model.config.training, 'metrics'):
+                            metric_names = model.config.training.metrics
+                        else:
+                            # Default metric names
+                            metric_names = ['loss'] + [f'metric_{i}' for i in range(len(eval_metrics)-1)]
+                        metric_dict = {name: val for name, val in zip(metric_names, eval_metrics)}
+                    else:
+                        metric_dict = eval_metrics
+                    
+                    metric_dict['fold'] = fold + 1
+                    metric_dict['model'] = model_name
+                    fold_results.append(metric_dict)
+                    
+                    self.logger.debug(f"Fold {fold + 1} metrics: {eval_metrics}")
+                    self.logger.info(f"Fold {fold + 1} results: {metric_dict}")
+
+                    self._create_fold_visualizations(model, X_val, y_val, history, model_name, fold + 1, background_data, model_dir)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in fold {fold + 1} for model {model_name}: {e}")
+                    self.logger.error(traceback.format_exc())
+                    continue
+
+                finally :
+                    if model :
+                        del model
+                    
+                    keras.backend.clear_session()
+                    gc.collect()
+                    self.logger.info(f"Cleaned up memory after fold {fold + 1}.")
+
+            # Aggregate results for current model
+            if fold_results:
+                model_agg_results = self._aggregate_results(model_name, fold_results)
+                model_results_path = os.path.join(model_dir, f"{self.n_splits}_folds_results.csv")
+                model_agg_results.to_csv(model_results_path, index = False)
+                all_results.append(model_agg_results)
+            else:
+                self.logger.warning(f"No successful folds for model {model_name}")
+
+        # Combine all results
+        if all_results:
+            self.results = pd.concat(all_results, ignore_index=True)
+            self.save_results(os.path.join(self.output, f"{self.n_splits}_folds_cross_validation_results.csv"))
+        
+        return self.results
+    
+    def _create_fold_visualizations(self, model_wrapper, X_val, y_val, history, model_name, fold_num, background_data, graphs_dir):
+        """
+        Create visualization plots for a specific fold and save to appropriate directory.
+        """
+        try:
+            # Create directory structure: graphs/model_name/fold_{num}
+            fold_dir = os.path.join(graphs_dir, f"fold_{fold_num}")
+            os.makedirs(fold_dir, exist_ok=True)
+            
+            # Use visualizer to create all plots
+            self.visualizer.create_cv_plots(
+                model_wrapper=model_wrapper,
+                X_val=X_val,
+                y_val=y_val,
+                history=history,
+                fold_dir=fold_dir,
+                class_names=self.class_names,
+                create_xai_plots=self.create_xai_plots,
+                create_embedding_plots=self.create_embedding_plots,
+                background_data=background_data
+            )
+            
+            self.logger.info(f"Visualizations for {model_name} fold {fold_num} saved to {fold_dir}")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating visualizations for {model_name} fold {fold_num}: {e}")
+
+    def _aggregate_results(self, model_name: str, fold_results: List[dict]) -> pd.DataFrame:
+        df_folds = pd.DataFrame(fold_results)
+
+        metric_cols = [col for col in df_folds.columns if col not in ['fold', 'model']]
+        
+        # Calculate mean and std for each metric
+        summary = {'model': model_name}
+        for col in metric_cols :
+            summary[f'mean_{col}'] = df_folds[col].mean()
+            summary[f'std_{col}'] = df_folds[col].std()
+            summary[f'min_{col}'] = df_folds[col].min()
+            summary[f'max_{col}'] = df_folds[col].max()
+
+        self.logger.info(f"Aggregated results for {model_name}: {summary}")
+        return pd.DataFrame([summary])
+
+    def save_results(self, filepath: str = None):
+        if filepath is None:
+            filepath = os.path.join(self.results_dir, "cross_validation_results.csv")
+        
+        try:
+            if filepath.endswith('.csv'):
+                self.results.to_csv(filepath, index=False)
+            elif filepath.endswith('.pkl'):
+                self.results.to_pickle(filepath)
+            else:
+                filepath += '.csv'
+                self.results.to_csv(filepath, index=False)
+                
+            self.logger.info(f"Cross-validation results saved to {filepath}")
+        except Exception as e:
+            self.logger.error(f"Failed to save results to {filepath}: {e}")
+
+    def get_best_model(self, metric: str = 'mean_accuracy', ascending: bool = False) -> str:
+        """Get the best performing model based on specified metric"""
+        if self.results.empty:
+            self.logger.warning("No results available. Run cross-validation first.")
+            return None
+        
+        if metric not in self.results.columns:
+            available_metrics = [col for col in self.results.columns if col.startswith('mean_')]
+            self.logger.warning(f"Metric {metric} not found. Available metrics: {available_metrics}")
+            metric = available_metrics[0] if available_metrics else 'model'
+        
+        best_model = self.results.sort_values(by=metric, ascending=ascending).iloc[0]
+        return best_model['model']
+
+--- END OF FILE cnn_base/Cross_Validation/validator.py ---
+
+
+--- START OF FILE cnn_base/Data/__init__.py ---
+
+from cnn_base.Data.data import Data_Loader
+
+__all__ = ["Data_Loader"]
+
+--- END OF FILE cnn_base/Data/__init__.py ---
+
+
+--- START OF FILE cnn_base/Data/data.py ---
+
+import os
+import numpy as np
+from PIL import Image
+from sklearn.model_selection import train_test_split
+import re
+import kagglehub
+from cnn_base.loggers import Logger
+
+class Data_Loader:
+    def __init__(self, logger: Logger = None):
+        self.logger = logger if logger else Logger("Data_Loader", "data_info.log", "data_error.log")
+
+    def _load_and_preprocess_image(self, image_path: str, image_size: tuple, mode: str) -> np.ndarray:
+        try:
+            img = Image.open(image_path).convert(mode)
+            img = img.resize(image_size)
+            img_array = np.array(img) / 255.0
+            return img_array
+        except Exception as e:
+            self.logger.error(f"Error processing image {image_path}: {e}")
+            return None
+
+    def _detect_classes(self, data_dir: str) -> dict:
+        extensions = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
+        class_dict = {}
+        for root, _, files in os.walk(data_dir):
+            image_files = [f for f in files if f.lower().endswith(extensions)]
+            if image_files:
+                class_name = os.path.basename(root)
+                class_dict[class_name] = [os.path.join(root, f) for f in image_files]
+        return class_dict
+
+    def _process_folder(self, folder_path: str, image_size: tuple, mode: str) -> tuple:
+        class_dict = self._detect_classes(folder_path)
+        all_images, all_labels = [], []
+        class_names = sorted(class_dict.keys())
+        self.logger.info(f"Found classes: {class_names} in {folder_path}")
+
+        for label, class_name in enumerate(class_names):
+            for image_path in class_dict[class_name]:
+                img_array = self._load_and_preprocess_image(image_path, image_size, mode=mode)
+                if img_array is not None:
+                    all_images.append(img_array)
+                    all_labels.append(label)
+        
+        if not all_images:
+            raise ValueError(f"No valid images found in {folder_path}")
+        
+        return np.array(all_images), np.array(all_labels), class_names
+
+    def _find_subfolder(self, base_dir: str, pattern: str) -> str:
+        regex = re.compile(pattern + r"s?.*", re.IGNORECASE)
+        for sub in os.listdir(base_dir):
+            sub_path = os.path.join(base_dir, sub)
+            if os.path.isdir(sub_path) and regex.search(sub):
+                return sub_path
+        return None
+
+    def fetch_and_save_data(
+            self,
+            data_dir: str,
+            output_dir: str = "processed_data",
+            image_size: tuple = (224, 224),
+            mode: str = "RGB",
+            random_state: int = 42,
+            validation : float = 0.2,
+            test : float = 0.2):
+        os.makedirs(output_dir, exist_ok=True)
+        self.logger.info(f"Starting data processing from '{data_dir}' with image size {image_size}.")
+
+        train_dir = self._find_subfolder(data_dir, "train")
+        val_dir = self._find_subfolder(data_dir, "val(idation)?")
+        test_dir = self._find_subfolder(data_dir, "test(ing)?")
+
+        if train_dir:
+            self.logger.info(f"Found training folder: {train_dir}")
+            X_train, y_train, class_names = self._process_folder(train_dir, image_size, mode)
+            
+            if validation :
+                if val_dir:
+                    self.logger.info(f"Found validation folder: {val_dir}")
+                    X_val, y_val, _ = self._process_folder(val_dir, image_size, mode)
+                else:
+                    self.logger.warning(f"No validation folder found. Splitting train data {(1 - validation) * 100}/{validation * 100} for train/validation.")
+                    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size = validation, stratify=y_train, random_state=random_state)
+
+            if test :
+                if test_dir:
+                    self.logger.info(f"Found testing folder: {test_dir}")
+                    X_test, y_test, _ = self._process_folder(test_dir, image_size, mode)
+                else:
+                    self.logger.warning(f"No testing folder found. Splitting train data {int((1 - validation - test) * 100)}/{int(test * 100)} for train/test.")
+                    test_split = test / (1  - validation)
+                    X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size = test_split, stratify=y_train, random_state=random_state)
+        else:
+            self.logger.info(f"No structured train/val/test folders found. Splitting data {int((1 - validation - test) * 100)}/{int(validation * 100)}/{int(test * 100)}...")
+            X_train, y_train, class_names = self._process_folder(data_dir, image_size, mode)
+            if validation :
+                X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=validation, stratify=y_train, random_state=random_state)
+            if test :
+                test_split = test / (1  - validation)
+                X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size = test_split, stratify=y_train, random_state=random_state)
+
+        data_splits = {
+            'X_train': X_train, 'y_train': y_train,
+            'class_names': np.array(class_names)
+        }
+        if validation :
+            data_splits.update({'X_val': X_val, 'y_val': y_val})
+        if test :
+            data_splits.update({'X_test': X_test, 'y_test': y_test})
+
+        for name, data in data_splits.items():
+            if data.size > 0:
+                np.save(os.path.join(output_dir, f'{name}.npy'), data)
+                self.logger.info(f"Saved {name}.npy with shape: {data.shape}")
+
+        self.logger.info(f"Data processing complete. Saved to '{output_dir}'.")
+
+        return data_splits
+
+    @staticmethod
+    def download_from_kaggle(path: str = None, dataset_name: str = "uraninjo/augmented-alzheimer-mri-dataset") -> str:
+        logger = Logger("KaggleDownloader", "data_info.log", "data_error.log")
+        logger.info(f"Downloading dataset '{dataset_name}' from Kaggle Hub...")
+        if path :
+            download_path = kagglehub.dataset_download(dataset_name, path)
+        else :
+            download_path = kagglehub.dataset_download(dataset_name)
+        logger.info(f"Dataset downloaded and unzipped to: {download_path}")
+        return download_path
+
+--- END OF FILE cnn_base/Data/data.py ---
+
+
+--- START OF FILE cnn_base/loggers/__init__.py ---
+
+from cnn_base.loggers.logger import Logger
+
+__all__ = ["Logger"]
+
+--- END OF FILE cnn_base/loggers/__init__.py ---
+
+
+--- START OF FILE cnn_base/loggers/logger.py ---
+
+import os
+import logging
+from cnn_base.configs.base_config import LOG_DIR
+import re
+import time
+
+class Logger:
+    def __init__(self, name: str = "My_Lib_Logger", info_file: str = "training_info.log", error_file: str = "training_error.log", new_file : bool = True, timestamped_name : bool = True):
+        self.logger = logging.getLogger(name)
+        self.new_file = new_file
+        self.timestamped_name = timestamped_name
+        self.current_log_dir = os.path.join(LOG_DIR, name)
+        os.makedirs(self.current_log_dir, exist_ok = True)
+        
+        if not self.logger.handlers:
+            self.logger.setLevel(logging.DEBUG)
+            
+            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            console_formatter = logging.Formatter("[%(name)s] %(message)s")
+
+            info_path = self._get_name(info_file)
+            info_handler = logging.FileHandler(info_path, encoding = "utf-8")
+            info_handler.setLevel(logging.DEBUG)
+            # info_handler.setLevel(logging.INFO)
+            info_handler.setFormatter(formatter)
+            
+            error_path = self._get_name(error_file)
+            error_handler = logging.FileHandler(error_path)
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(formatter)
+            
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            console_handler.setFormatter(console_formatter)
+
+            self.logger.addHandler(info_handler)
+            self.logger.addHandler(error_handler)
+            self.logger.addHandler(console_handler)
+
+    def _get_name(self, name : str) -> str :
+        if self.timestamped_name :
+            # If you want log file naming patterns with timestamps
+            # use this code below
+            return os.path.join(self.current_log_dir, f"{name}__{time.strftime('%d_%m_%Y__%H_%M_%S')}")
+        if os.path.exists(os.path.join(self.current_log_dir, name)) and self.new_file :
+            # If you want log file naming patterns without timestamps
+            # and instead want to use names like {file (1).log} and {file (2).log}
+            # for duplicate names, uncomment below code
+            pattern = r"[a-zA-Z0-9-_.]+ \([0-9]+\)"
+
+            if re.fullmatch(pattern, name) :
+                sub_pattern = "([0-9]+)"
+                splitted = name.split()
+                splitted[-1] = re.sub(sub_pattern, lambda m : str(int(m.group(1)) + 1), splitted[-1])
+                name = " ".join(splitted)
+            else :
+                name += " (1)"
+            return self._get_name(name)
+        else :
+            return os.path.join(self.current_log_dir, name)
+
+    def info(self, message: str) -> None:
+        self.logger.info(message)
+
+    def warning(self, message: str) -> None:
+        self.logger.warning(message)
+
+    def error(self, message: str) -> None:
+        self.logger.error(message, exc_info=True)
+    
+    def debug(self, message: str) -> None:
+        self.logger.debug(message)
+
+--- END OF FILE cnn_base/loggers/logger.py ---
+
+
+--- START OF FILE cnn_base/Models/__init__.py ---
+
+from cnn_base.Models.CNN import Model as CNN
+from cnn_base.Models.Transformers import Model as Transformers
+from cnn_base.Models.get_model import get_model, get_all_models
+
+__all__ = ["CNN", "Transformers", "get_model", "get_all_models"]
+
+--- END OF FILE cnn_base/Models/__init__.py ---
+
+
+--- START OF FILE cnn_base/Models/base_model.py ---
+
+import tensorflow as tf
+import keras
+from keras import Model as Keras_Model
+from copy import deepcopy
+from joblib import dump, load
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
+
+from cnn_base.loggers import Logger
+from cnn_base.configs.base_config import (
+    Global_Config, OPTIMIZERS, LR_SCHEDULERS, get_model_path, def_callbacks
+)
+from cnn_base.configs.cnn_config import DEFAULT_CNN_CONFIG
+
+class Base_Model(Keras_Model, ABC):
+    def __init__(self, name: str = "base_model", config: Global_Config = None, **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.base_model = None
+        self.model: Keras_Model = None
+        self.outputs_layer: tf.Tensor = None
+        self.config: Global_Config = deepcopy(config) if config else deepcopy(DEFAULT_CNN_CONFIG)
+        self.logger: Logger = Logger(name=self.name)
+        self.callbacks: list = def_callbacks(self.logger, self.name)
+        self.logger.info(f"Model '{self.name}' initialized.")
+        self.logger.debug(f"Initial config: {self.config.model_dump_json(indent=2)}")
+    
+    def update_config(self, updates: dict) -> None:
+        model = self.config
+        self.update_attr(model, updates)
+        self.config = Global_Config.model_validate(model)
+        Logger().info(f"Global config updated to: {self.config.model_dump_json(indent=2)}")
+
+    def update_attr(self, attr : BaseModel, updates: dict) -> None:
+        for key, value in updates.items():
+            if hasattr(attr, key):
+                if isinstance(attr, BaseModel) :
+                    new_attr = getattr(attr, key)
+                    if isinstance(new_attr, BaseModel) :
+                        attr = new_attr
+                # If attribute is itself a BaseModel and value is dict, recurse
+                if isinstance(attr, BaseModel) and isinstance(value, dict):
+                    self.update_attr(attr, value)
+                else:
+                    setattr(attr, key, value)
+            else:
+                raise AttributeError(f"{attr.__class__.__name__} has no attribute '{key}'")
+        Logger().info(f"Global config updated to: {self.config.model_dump_json(indent=2)}")
+
+    @abstractmethod
+    def get_base_model(self, name: str) -> 'Base_Model':
+        raise NotImplementedError
+
+    def _rebuild_model(self) -> 'Base_Model':
+        if self.base_model is None or self.outputs_layer is None:
+            self.logger.error("Cannot rebuild model: base_model or outputs_layer is missing.")
+            return self
+        try:
+            self.model = Keras_Model(inputs=self.base_model.input, outputs=self.outputs_layer)
+            self.logger.info("Model rebuilt successfully.")
+        except Exception as e:
+            self.logger.error(f"Error rebuilding model: {e}")
+        return self
+
+    def compile(self, optimizer_config: dict = None) -> 'Base_Model':
+        try:
+            opt_config = self.config.optimizer
+            if optimizer_config:
+                opt_config = opt_config.model_copy(update=optimizer_config)
+
+            learning_rate = opt_config.learning_rate
+            
+            if opt_config.scheduler_name and opt_config.scheduler_name in LR_SCHEDULERS:
+                scheduler_info = deepcopy(LR_SCHEDULERS[opt_config.scheduler_name])
+                scheduler_params = scheduler_info["params"]
+                scheduler_params.update(opt_config.scheduler_params)
+                if "initial_learning_rate" in scheduler_params:
+                    scheduler_params["initial_learning_rate"] = learning_rate
+                learning_rate = scheduler_info["class"](**scheduler_params)
+                self.logger.info(f"Using LR Scheduler: {opt_config.scheduler_name}")
+            
+            optimizer_info = deepcopy(OPTIMIZERS[opt_config.name])
+            optimizer_params = optimizer_info["params"]
+            optimizer_params.update(opt_config.params)
+            
+            if "learning_rate" not in optimizer_info["class"].__init__.__code__.co_varnames:
+                optimizer_instance = optimizer_info["class"](**optimizer_params)
+                keras.backend.set_value(optimizer_instance.learning_rate, learning_rate)
+            else:
+                optimizer_params["learning_rate"] = learning_rate
+                optimizer_instance = optimizer_info["class"](**optimizer_params)
+            
+            self.model.compile(
+                optimizer=optimizer_instance,
+                loss=self.config.training.loss,
+                metrics=self.config.training.metrics
+            )
+            self.logger.info(f"Model compiled with Optimizer: {opt_config.name} and Loss: {self.config.training.loss}")
+        except Exception as e:
+            self.logger.error(f"Error compiling model: {e}")
+        return self
+
+    def summary(self) -> None:
+        if self.model:
+            self.model.summary(print_fn=lambda x: self.logger.info(x))
+        else:
+            self.logger.error("No model to summarize.")
+
+    def call(self, inputs, training=False):
+        return self.model(inputs, training=training)
+
+    def save(self, file_path: str = None):
+        try:
+            if file_path is None:
+                file_path_keras = get_model_path(self.name, ".keras")
+                file_path_wrapper = get_model_path(self.name, ".pkl")
+            else:
+                file_path_keras = file_path + ".keras"
+                file_path_wrapper = file_path + ".pkl"
+
+            self.model.save(file_path_keras)
+            
+            model_to_save = self.model
+            self.model = None
+            dump(self, file_path_wrapper)
+            self.model = model_to_save
+
+            self.logger.info(f"Model saved to {file_path_keras} and wrapper to {file_path_wrapper}")
+        except Exception as e:
+            self.logger.error(f"Error saving model: {e}")
+
+    @staticmethod
+    def load(wrapper_path: str) -> 'Base_Model':
+        try:
+            model_wrapper = load(wrapper_path)
+            keras_path = wrapper_path.replace(".pkl", ".keras")
+            model_wrapper.model = keras.models.load_model(keras_path, compile=False)
+            model_wrapper.logger.info(f"Model wrapper loaded from {wrapper_path}")
+            model_wrapper.logger.info(f"Keras model loaded from {keras_path}. Re-compile the model before training.")
+            return model_wrapper
+        except Exception as e:
+            Logger().error(f"Error loading model from {wrapper_path}: {e}")
+            return None
+
+    def fit(self, x, y, validation_data : tuple = None, **kwargs):
+        fit_config = self.config.training.model_dump()
+        fit_config.update(kwargs)
+        self.logger.info(f"Starting training for {fit_config['epochs']} epochs with batch size {fit_config['batch_size']}.")
+        
+        try:
+            history = self.model.fit(
+                x = x,
+                y = y,
+                validation_data=validation_data,
+                epochs=fit_config['epochs'],
+                batch_size=fit_config['batch_size'],
+                callbacks=kwargs.get('callbacks', self.callbacks),
+                verbose=kwargs.get('verbose', 1)
+            )
+            self.logger.info("Training finished successfully.")
+            return history
+        except Exception as e:
+            self.logger.error(f"Error during training: {e}")
+            return None
+
+    def predict(self, data, **kwargs):
+        pred_config = self.config.training.model_dump()
+        pred_config.update(kwargs)
+        return self.model.predict(data, batch_size=pred_config['batch_size'], verbose=kwargs.get('verbose', 1))
+
+    def evaluate(self, X, y = None, **kwargs):
+        eval_config = self.config.training.model_dump()
+        eval_config.update(kwargs)
+        return self.model.evaluate(
+            x = X,
+            y = y,
+            batch_size = eval_config['batch_size'],
+            return_dict = True,
+            verbose = kwargs.get('verbose', 1)
+            )
+
+--- END OF FILE cnn_base/Models/base_model.py ---
+
+
+--- START OF FILE cnn_base/Models/get_model.py ---
+
+from cnn_base.loggers import Logger
+from cnn_base.Models.CNN import Model as CNN_Model
+from cnn_base.Models.Transformers import Model as Transformer_Model
+from cnn_base.Models.CNN.providers import _KERAS_MODEL_DICT as cnn_keras_models, _HUB_URLS as cnn_hub_models
+from cnn_base.Models.Transformers.providers import _HUB_URLS as transformer_hub_models
+
+logger = Logger("Get_Model_Logger", "get_model_info.log", "get_model_error.log")
+
+def get_all_models() -> list[str] :
+    return list(cnn_keras_models.keys()) + list(cnn_hub_models.keys()), list(transformer_hub_models.keys())
+
+def get_model(model_name: str, **kwargs):
+    clean_name = model_name.lower().replace('-', '_').replace(' ', '_')
+
+    cnn_models, transformer_models = get_all_models()
+
+    if clean_name in  cnn_models:
+        logger.info(f"'{model_name}' identified as a CNN. Instantiating CNN_Model.")
+        model_instance = CNN_Model(name=clean_name, **kwargs)
+        model_instance.get_base_model(clean_name)
+        return model_instance
+    
+    elif clean_name in transformer_models:
+        logger.info(f"'{model_name}' identified as a Vision Transformer. Instantiating Transformer_Model.")
+        model_instance = Transformer_Model(name=clean_name, **kwargs)
+        model_instance.get_base_model(clean_name)
+        return model_instance
+        
+    else:
+        logger.error(f"Model '{model_name}' not found in any model provider.")
+        raise ValueError(f"Model '{model_name}' is not supported.")
+
+--- END OF FILE cnn_base/Models/get_model.py ---
+
+
+--- START OF FILE cnn_base/Models/CNN/__init__.py ---
+
+from cnn_base.Models.CNN.model import Model
+from cnn_base.Models.CNN.providers import get_model
+
+__all__ = ["Model", "get_model"]
+
+--- END OF FILE cnn_base/Models/CNN/__init__.py ---
+
+
+--- START OF FILE cnn_base/Models/CNN/model.py ---
+
+import tensorflow as tf
+from typing import List
+import keras
+from keras.layers import GlobalAveragePooling2D, BatchNormalization, Dropout, Dense
+
+from cnn_base.Models.base_model import Base_Model
+from cnn_base.Models.CNN.providers import get_model as get_cnn_layers
+from cnn_base.configs.base_config import get_custom_layers
+from cnn_base.configs.cnn_config import DEFAULT_CNN_CONFIG
+
+class Model(Base_Model):
+    def __init__(self, name: str = "cnn_model", **kwargs):
+        super().__init__(name=name, config=DEFAULT_CNN_CONFIG, **kwargs)
+
+    def get_base_model(self, name: str) -> 'Model':
+        try:
+            inputs, outputs = get_cnn_layers(name, img_size=self.config.model.img_size)
+            self.base_model = keras.Model(inputs, outputs, name=name)
+            self.freeze_all()
+
+            self.outputs_layer = self.base_model.output
+            self.add_custom_layers()
+            self.compile()
+            self.logger.info(f"CNN base model '{name}' built successfully.")
+        except Exception as e:
+            self.logger.error(f"Error building CNN base model '{name}': {e}")
+        return self
+
+    def _set_trainable_status(self, layers_to_modify: List[keras.layers.Layer], trainable: bool):
+        count = 0
+        for layer in layers_to_modify:
+            try:
+                if layer.trainable != trainable:
+                    layer.trainable = trainable
+                    count += 1
+            except Exception as e:
+                self.logger.error(f"Could not set trainable={trainable} for layer {layer.name}: {e}")
+        status = "unfrozen" if trainable else "frozen"
+        self.logger.info(f"{count} layers have been {status}.")
+
+    def freeze_all(self) -> 'Model':
+        self._set_trainable_status(self.base_model.layers, trainable=False)
+        return self
+
+    def unfreeze_all(self) -> 'Model':
+        self._set_trainable_status(self.base_model.layers, trainable=True)
+        return self
+
+    def freeze_early_n(self, n: int = None) -> 'Model':
+        if n is None:
+            n = self.config.model.n_layers_to_tune
+        if n == 0 :
+            return self
+        if n > len(self.base_model.layers):
+             self.logger.warning(f"Requested to freeze {n} layers, but model only has {len(self.base_model.layers)}. Freezing all.")
+             n = len(self.base_model.layers)
+        self._set_trainable_status(self.base_model.layers[:n], trainable=False)
+        return self
+
+    def unfreeze_later_n(self, n: int = None) -> 'Model':
+        if n is None:
+            n = self.config.model.n_layers_to_tune
+        if n == 0 :
+            return self
+        if n > len(self.base_model.layers):
+             self.logger.warning(f"Requested to unfreeze {n} layers, but model only has {len(self.base_model.layers)}. Unfreezing all.")
+             n = len(self.base_model.layers)
+        self._set_trainable_status(self.base_model.layers[-n:], trainable=True)
+        return self
+    
+    def freeze_upto_layer(self, layer_name: str) -> 'Model':
+        try:
+            layer_found = False
+            for layer in self.base_model.layers:
+                layer.trainable = False
+                if layer.name == layer_name:
+                    layer_found = True
+                    break
+            if layer_found:
+                 self.logger.info(f"Froze layers up to and including '{layer_name}'.")
+            else:
+                 self.logger.error(f"Layer '{layer_name}' not found in the model. Froze all")
+        except Exception as e:
+            self.logger.error(f"Error during freeze_upto_layer: {e}")
+        return self
+    
+    def unfreeze_after_layer(self, layer_name: str) -> 'Model':
+        try:
+            layer_found = False
+            for layer in self.base_model.layers:
+                if layer.name == layer_name:
+                    layer_found = True
+                layer.trainable = layer_found
+            if layer_found:
+                 self.logger.info(f"Froze layers up to '{layer_name}' and unfroze all after and including it.")
+            else:
+                 self.logger.error(f"Layer '{layer_name}' not found in the model. Froze all")
+        except Exception as e:
+            self.logger.error(f"Error during unfreeze_after_layer : {e}")
+        return self
+    
+    def add_custom_layers(self, layers_list: list = None) -> 'Model':
+        """
+        layers : list of keras.layers.Layer
+                    If given, then adds these layer after layer_name
+                    If not given, adds custom layers from config
+                    after adding these, adds the remaining layers from the model
+        """
+        try:
+            if layers_list is None:
+                layers_list = get_custom_layers(self.config.model.num_classes)
+            
+            x = self.outputs_layer
+            for layer in layers_list:
+                x = layer(x)
+            self.outputs_layer = x
+            
+            self._rebuild_model()
+            self.logger.info(f"Added {len(layers_list)} custom layers to the model head.")
+        except Exception as e:
+            self.logger.error(f"Error adding custom layers: {e}")
+        return self
+
+    def add_layers_in_between(self, layer_name : str, layers : list[keras.layers.Layer]) -> 'Model' :
+        """
+        layers : list of keras.layers.Layer
+                    If given, then adds these layer after layer_name
+                    If not given, adds custom layers from config
+                    after adding these, adds the remaining layers from the model
+        """
+        try :
+            if layers_list is None:
+                layers_list = get_custom_layers(self.config.model.num_classes)
+            
+            target_layer = self.model.get_layer(layer_name)
+            index = self.model.layers.index(target_layer)
+
+            x = target_layer.output
+
+            for layer in layers_list :
+                x = layer(x)
+
+            for layer in self.model.layers[index + 1 :] :
+                x = layer(x)
+
+            self.outputs_layer = x
+
+            self._rebuild_model()
+            self.logger.info(f"Added custom layers after {layer_name}")
+        except Exception as e :
+            self.logger.error(e)
+        return self
+
+    def cut_at_layer_and_add_custom_layers(self, layer_name: str, layers_list: list = None) -> 'Model':
+        try:
+            if layers_list is None:
+                layers_list = get_custom_layers(self.config.model.num_classes)
+            
+            x = self.model.get_layer(layer_name).output
+            for layer in layers_list:
+                x = layer(x)
+            self.outputs_layer = x
+            
+            self._rebuild_model()
+            self.logger.info(f"Cut model at '{layer_name}' and added {len(layers_list)} custom layers.")
+        except Exception as e:
+            self.logger.error(f"Error cutting and adding layers at '{layer_name}': {e}")
+        return self
+
+    def cut_at_layer(self, layer_name: str) -> 'Model':
+        try:
+            self.outputs_layer = self.model.get_layer(layer_name).output
+            
+            self._rebuild_model()
+            self.logger.info(f"Cut model at '{layer_name}'.")
+        except Exception as e:
+            self.logger.error(f"Error cutting at '{layer_name}': {e}")
+        return self
+
+    def remove_last_layer(self) -> 'Model' :
+        try :
+            last_second_layer = self.model.layers[-2]
+            self.outputs_layer = last_second_layer.output
+            self._rebuild_model()
+            self.logger.info("Removed last layer")
+        except Exception as e :
+            self.logger.error(e)
+        return self
+
+    def remove_N_layers(self, n : int = None) -> 'Model' :
+        """
+        If you do not provide N, it takes default from config
+        """
+        try :
+            if n is None:
+                n = self.config.model.n_layers_to_tune
+            if n > len(self.base_model.layers):
+                self.logger.warning(f"Requested to remove {n} layers, but model only has {len(self.base_model.layers)}. Removing none.")
+                return self
+            
+            remove_after_layer = self.model.layers[-(n + 1)].name
+            self.outputs_layer = self.model.get_layer(remove_after_layer).output
+            self.logger.info(f"Removed last {n} layers")
+        except Exception as e :
+            self.logger.error(e)
+        return self
+
+    def remove_layer_in_between(self, layer_name : str) -> 'Model' :
+        try :
+            target_layer = self.model.get_layer(layer_name)
+            index = self.model.layers.index(target_layer)
+            prev_layer = self.model.layers[index - 1]
+
+            x = prev_layer.output
+            for layer in self.model.layers[index + 1 :]:
+                x = layer(x)
+            self.outputs_layer = x
+
+            self._rebuild_model()
+            self.logger.info(f"Removed {layer_name} layer and reconnected network")
+        except Exception as e :
+            self.logger.error(e)
+        return self
+
+--- END OF FILE cnn_base/Models/CNN/model.py ---
+
+
+--- START OF FILE cnn_base/Models/CNN/providers.py ---
+
+import keras
+import tensorflow_hub as hub
+from keras.applications import (
+    VGG16, VGG19, ResNet50, ResNet101, DenseNet121, DenseNet201, InceptionV3,
+    InceptionResNetV2, Xception, EfficientNetB0, EfficientNetB7, MobileNetV2,
+    NASNetMobile
+)
+
+_KERAS_MODEL_DICT = {
+    "vgg16": VGG16,
+    "vgg19": VGG19,
+    "resnet50": ResNet50,
+    "resnet101": ResNet101,
+    "densenet121": DenseNet121,
+    "densenet201": DenseNet201,
+    "inceptionv3": InceptionV3,
+    "inceptionresnetv2": InceptionResNetV2,
+    "xception": Xception,
+    "efficientnetb0": EfficientNetB0,
+    "efficientnetb7": EfficientNetB7,
+    "mobilenetv2": MobileNetV2,
+    "nasnetmobile": NASNetMobile,
+}
+
+_HUB_URLS = {
+    "se_resnet50": "https://tfhub.dev/google/imagenet/se_resnet_50/feature_vector/1",
+    "resnext101": "https://tfhub.dev/google/imagenet/resnext_101/feature_vector/4",
+    "regnety_800mf": "https://tfhub.dev/google/regnety_008/imagenet/feature_vector/1",
+    "convnext_tiny": "https://tfhub.dev/google/convnext_tiny_1k_224/feature_vector/2",
+    "bit_r50x1": "https://tfhub.dev/google/bit/m-r50x1/1",
+    "bit_r101x3": "https://tfhub.dev/google/bit/m-r101x3/1",
+    "bit_r152x4": "https://tfhub.dev/google/bit/m-r152x4/1",
+    "noisy_student_efficientnet_l2": "https://tfhub.dev/google/efficientnet/noisy-student/l2/feature-vector/1",
+    "noisy_student_efficientnet_b1": "https://tfhub.dev/google/efficientnet/noisy-student/b1/feature-vector/1",
+    # "noisy_student_efficientnet_b2": "https://tfhub.dev/google/efficientnet/noisy-student/b2/feature-vector/1",
+    # "noisy_student_efficientnet_b3": "https://tfhub.dev/google/efficientnet/noisy-student/b3/feature-vector/1",
+    "noisy_student_efficientnet_b4": "https://tfhub.dev/google/efficientnet/noisy-student/b4/feature-vector/1",
+    # "noisy_student_efficientnet_b5": "https://tfhub.dev/google/efficientnet/noisy-student/b5/feature-vector/1",
+    "noisy_student_efficientnet_b6": "https://tfhub.dev/google/efficientnet/noisy-student/b6/feature-vector/1",
+    "hrnet": "https://www.kaggle.com/models/rishitdagli/hrnet-tf/frameworks/TensorFlow2/variations/hrnet-w18-imagenet-classification/versions/1",
+}
+
+def _get_keras_app_model(name: str, **kwargs):
+    model_fn = _KERAS_MODEL_DICT[name]
+    input_shape = kwargs["img_size"] + (3,)
+    
+    base_model = model_fn(
+        weights=kwargs.get("weights", "imagenet"),
+        include_top=kwargs.get("include_top", False),
+        input_shape=input_shape
+    )
+    return base_model.input, base_model.output
+
+def _get_hub_model(model_name: str, **kwargs):
+    handle = _HUB_URLS[model_name]
+    input_shape = kwargs["img_size"] + (3,)
+    
+    inputs = keras.Input(shape=input_shape)
+    hub_layer = hub.KerasLayer(handle, trainable=kwargs.get("trainable", True))
+    outputs = hub_layer(inputs)
+    
+    if isinstance(outputs, dict):
+        output_key = "default" if "default" in outputs else list(outputs.keys())[0]
+        final_output = outputs[output_key]
+    else:
+        final_output = outputs
+        
+    return inputs, final_output
+
+def get_model(name: str, **kwargs):
+    if name in _KERAS_MODEL_DICT:
+        return _get_keras_app_model(name, **kwargs)
+    elif name in _HUB_URLS:
+        return _get_hub_model(name, **kwargs)
+    else:
+        raise ValueError(f"CNN model '{name}' is not implemented or the name is incorrect.")
+
+--- END OF FILE cnn_base/Models/CNN/providers.py ---
+
+
+--- START OF FILE cnn_base/Models/CNN/Callbacks/__init__.py ---
+
+from cnn_base.Models.CNN.Callbacks.progressive_unfreezer import ProgressiveUnfreezer
+from cnn_base.Models.CNN.Callbacks.discriminative_lr import DiscriminativeLRScheduler
+
+__all__ = ["ProgressiveUnfreezer", "DiscriminativeLRScheduler"]
+
+--- END OF FILE cnn_base/Models/CNN/Callbacks/__init__.py ---
+
+
+--- START OF FILE cnn_base/Models/CNN/Callbacks/discriminative_lr.py ---
+
+import keras
+
+class DiscriminativeLRScheduler(keras.callbacks.Callback):
+    def __init__(self, logger, base_lr=1e-4, multiplier=2.0):
+        super().__init__()
+        self.base_lr = base_lr
+        self.multiplier = multiplier
+        self.logger = logger
+
+    def on_epoch_begin(self, epoch, logs=None):
+        try :
+            # progressively assign LR depending on layer depth
+            for i, layer in enumerate(self.model.layers):
+                lr = self.base_lr * (self.multiplier ** (i / len(self.model.layers)))
+                if hasattr(layer, "kernel"):
+                    keras.backend.set_value(self.model.optimizer.lr, lr)
+            self.logger.info(f"[DiscriminativeLRScheduler] Epoch {epoch} - LR updated")
+        except Exception as e :
+            self.logger.error(f"[DiscriminativeLRScheduler] Error while updateing error during epoch {epoch}")
+
+--- END OF FILE cnn_base/Models/CNN/Callbacks/discriminative_lr.py ---
+
+
+--- START OF FILE cnn_base/Models/CNN/Callbacks/progressive_unfreezer.py ---
+
+import keras
+
+class ProgressiveUnfreezer(keras.callbacks.Callback):
+    def __init__(self, logger, block_size: int = 10, interval: int = 5):
+        super().__init__()
+        self.block_size = block_size
+        self.interval = interval
+        self.logger = logger
+
+    def on_epoch_begin(self, epoch, logs=None):
+        try:
+            if epoch % self.interval == 0 and epoch > 0:
+                # Unfreeze next block
+                num_unfrozen = min(
+                    self.block_size * (epoch // self.interval),
+                    len(self.model.layers)
+                )
+                for layer in self.model.layers[-num_unfrozen:]:
+                    layer.trainable = True
+
+                # Need to recompile to take effect
+                self.model.compile(
+                    optimizer=self.model.optimizer.__class__.from_config(
+                        self.model.optimizer.get_config()
+                    ),
+                    loss=self.model.loss,
+                    metrics=self.model.metrics,
+                )
+
+                self.logger.info(
+                    f"[ProgressiveUnfreezer] Unfroze last {num_unfrozen} layers at epoch {epoch}"
+                )
+        except Exception as e:
+            self.logger.error(
+                f"[ProgressiveUnfreezer] Error unfreezing at epoch {epoch}: {e}"
+            )
+
+--- END OF FILE cnn_base/Models/CNN/Callbacks/progressive_unfreezer.py ---
+
+
+--- START OF FILE cnn_base/Models/Transformers/__init__.py ---
+
+from .model import Model
+from .providers import get_model
+
+__all__ = ["Model", "get_model"]
+
+--- END OF FILE cnn_base/Models/Transformers/__init__.py ---
+
+
+--- START OF FILE cnn_base/Models/Transformers/model.py ---
+
+import tensorflow as tf
+import keras
+from keras.optimizers import AdamW
+
+from cnn_base.Models.base_model import Base_Model
+from cnn_base.Models.Transformers.providers import get_model as get_transformer_layers
+from cnn_base.configs.transformers_config import DEFAULT_TRANSFORMER_CONFIG
+
+class Model(Base_Model):
+    def __init__(self, name: str = "transformer_model", **kwargs):
+        super().__init__(name=name, config=DEFAULT_TRANSFORMER_CONFIG, **kwargs)
+
+    def get_base_model(self, name: str) -> 'Model':
+        try:
+            inputs, outputs = get_transformer_layers(name, img_size=self.config.model.img_size)
+            self.base_model = keras.Model(inputs, outputs, name=name)
+            
+            x = keras.layers.LayerNormalization(epsilon=1e-6)(self.base_model.output)
+            x = keras.layers.Dense(self.config.model.num_classes, activation="softmax", name="predictions")(x)
+            self.outputs_layer = x
+
+            self._rebuild_model()
+            self.compile()
+            self.logger.info(f"Transformer base model '{name}' built successfully with a new prediction head.")
+        except Exception as e:
+            self.logger.error(f"Error building Transformer base model '{name}': {e}")
+        return self
+
+    def freeze_patch_embeddings(self) -> 'Model':
+        try:
+            for layer in self.base_model.layers:
+                if 'patch_embeddings' in layer.name or 'embedding' in layer.name:
+                    layer.trainable = False
+            self.logger.info("Froze patch embedding layers.")
+        except Exception as e:
+            self.logger.error(f"Error freezing patch embeddings: {e}")
+        return self
+    
+    def unfreeze_all(self) -> 'Model':
+        for layer in self.base_model.layers:
+            layer.trainable = True
+        self.logger.info("Unfroze all transformer layers.")
+        return self
+
+    def unfreeze_last_n_blocks(self, n_blocks: int) -> 'Model':
+        try:
+            transformer_layers = [l for l in self.base_model.layers if 'transformer_block' in l.name or 'layer' in l.name]
+            
+            for layer in self.base_model.layers:
+                layer.trainable = False 
+            
+            if n_blocks > len(transformer_layers):
+                 self.logger.warning(f"Requested to unfreeze {n_blocks}, but found only {len(transformer_layers)}. Unfreezing all of them.")
+                 n_blocks = len(transformer_layers)
+
+            for layer in transformer_layers[-n_blocks:]:
+                layer.trainable = True
+
+            for layer in self.model.layers:
+                if 'normalization' in layer.name or 'predictions' in layer.name:
+                    layer.trainable = True
+
+            self.logger.info(f"Unfroze the last {n_blocks} transformer blocks and the head.")
+        except Exception as e:
+            self.logger.error(f"Error unfreezing last {n_blocks} blocks: {e}")
+        return self
+    
+    def compile_with_llrd(self, head_lr_multiplier: float = 2.0, decay_rate: float = 0.75) -> 'Model':
+        self.logger.info(f"Setting up optimizer with Layer-wise Learning Rate Decay (LLRD).")
+        
+        opt_config = self.config.optimizer
+        learning_rate = opt_config.learning_rate
+        weight_decay = opt_config.params.get("weight_decay", 0.01)
+
+        layer_lrs = {}
+        
+        encoder_layers = [l for l in self.base_model.layers if 'transformer_block' in l.name or 'layer' in l.name]
+        num_encoder_layers = len(encoder_layers)
+        
+        for i, layer in enumerate(encoder_layers):
+            lr_scale = decay_rate ** (num_encoder_layers - i - 1)
+            layer_lrs[layer.name] = learning_rate * lr_scale
+        
+        embedding_layer_names = [l.name for l in self.base_model.layers if 'embedding' in l.name]
+        for name in embedding_layer_names:
+            layer_lrs[name] = learning_rate * (decay_rate ** num_encoder_layers)
+
+        head_layer_names = [l.name for l in self.model.layers if l not in self.base_model.layers]
+        for name in head_layer_names:
+            layer_lrs[name] = learning_rate * head_lr_multiplier
+
+        optimizer = AdamW(learning_rate=learning_rate, weight_decay=weight_decay)
+        optimizer.learning_rate.assign(learning_rate)
+        optimizer.add_variable_with_custom_gradient(
+            'learning_rate_multipliers',
+            initial_value=layer_lrs,
+            dtype=tf.float32,
+        )
+        
+        try:
+            self.model.compile(
+                optimizer=optimizer,
+                loss=self.config.training.loss,
+                metrics=self.config.training.metrics
+            )
+            self.logger.info("Model compiled successfully with LLRD optimizer.")
+        except Exception as e:
+            self.logger.error(f"Error compiling model with LLRD: {e}")
+            
+        return self
+
+--- END OF FILE cnn_base/Models/Transformers/model.py ---
+
+
+--- START OF FILE cnn_base/Models/Transformers/providers.py ---
+
+import keras
+import tensorflow_hub as hub
+
+_HUB_URLS = {
+    "vit_base": "https://tfhub.dev/google/vit_base_patch16_224/1",
+    "vit_large": "https://tfhub.dev/google/vit_large_patch16_224/1",
+    "swin_transformer": "https://tfhub.dev/google/swin_tiny_patch4_window7_224/1",
+    "deit_base": "https://tfhub.dev/google/deit/base_distilled_patch16_224/1",
+    "beit": "https://tfhub.dev/google/beit/base/patch16/224/1",
+    "mobilevit": "https://tfhub.dev/google/mobilevit/xs/1",
+    "poolformer": "https://www.kaggle.com/models/sayannath/poolformer/frameworks/TensorFlow2/variations/poolformer-s12-fe/versions/1",
+    "pvt": "https://www.kaggle.com/models/sayannath/pvt/frameworks/TensorFlow2/variations/pvt-tiny-fe/versions/1",
+    "twins-svt": "https://www.kaggle.com/models/sayannath/twins-svt/frameworks/TensorFlow2/variations/twins-svt-s-fe/versions/1",
+    "t2t-vit": "https://www.kaggle.com/models/sayannath/t2t-vit/frameworks/TensorFlow2/variations/t2t-vit-14-fe/versions/1",
+    "efficientformer-l1": "https://www.kaggle.com/models/google/efficientformer/frameworks/TensorFlow2/variations/l1-fe/versions/1",
+}
+
+def _get_hub_model(model_name: str, **kwargs):
+    handle = _HUB_URLS[model_name]
+    input_shape = kwargs["img_size"] + (3,)
+    
+    inputs = keras.Input(shape=input_shape)
+    hub_layer = hub.KerasLayer(handle, trainable=kwargs.get("trainable", True))
+    outputs = hub_layer(inputs)
+    
+    if isinstance(outputs, dict):
+        output_key = "default" if "default" in outputs else list(outputs.keys())[0]
+        final_output = outputs[output_key]
+    else:
+        final_output = outputs
+        
+    return inputs, final_output
+
+def get_model(name: str, **kwargs):
+    if name in _HUB_URLS:
+        return _get_hub_model(name, **kwargs)
+    else:
+        raise ValueError(f"Transformer model '{name}' is not implemented or the name is incorrect.")
+
+--- END OF FILE cnn_base/Models/Transformers/providers.py ---
+
+
+--- START OF FILE cnn_base/Models/Transformers/Callbacks/__init__.py ---
+
+from cnn_base.Models.Transformers.Callbacks.progressive_unfreezer import ProgressiveUnfreezer
+
+__all__ = ["ProgressiveUnfreezer"]
+
+--- END OF FILE cnn_base/Models/Transformers/Callbacks/__init__.py ---
+
+
+--- START OF FILE cnn_base/Models/Transformers/Callbacks/progressive_unfreezer.py ---
+
+import keras
+import re
+
+class Progressive_Unfreezer(keras.callbacks.Callback):
+    def __init__(self, logger, interval: int = 1):
+        super().__init__()
+        self.interval = interval
+        self.unfreeze_block_count = 0
+        self.logger = logger
+        self.transformer_blocks = []
+
+    def on_train_begin(self, logs=None):
+        try:
+            # Find all transformer blocks (layers) in the model, usually indexed
+            # Assumes huggingface naming convention e.g., 'tf_bert_layer_._0', 'tf_bert_layer_._1', ...
+            block_regex = re.compile(r"(layer|block|resblock)_\._\d+$", re.IGNORECASE)
+
+            # Identify layers belonging to the encoder/transformer body
+            transformer_body = None
+            for layer in self.model.layers:
+                if "main_layer" in layer.name and hasattr(layer, 'layers'):
+                    transformer_body = layer
+                    break
+
+            if transformer_body:
+                self.transformer_blocks = [l for l in transformer_body.layers if block_regex.search(l.name)]
+                self.transformer_blocks.reverse() # Start unfreezing from the top
+
+            if not self.transformer_blocks:
+                self.logger.warning("[ProgressiveUnfreezer] Could not find transformer blocks to unfreeze.")
+                return
+
+            # Initially freeze all transformer blocks
+            for block in self.transformer_blocks:
+                block.trainable = False
+
+            # Ensure head and embeddings are trainable
+            for layer in self.model.layers:
+                if 'pooler' in layer.name or 'classifier' in layer.name or 'embeddings' in layer.name:
+                     layer.trainable = True
+
+            self.logger.info(f"[ProgressiveUnfreezer] Initial state: All {len(self.transformer_blocks)} blocks frozen.")
+
+            # A re-compile is necessary to apply trainable changes
+            self.model.compile(optimizer=self.model.optimizer, loss=self.model.loss, metrics=self.model.metrics)
+
+        except Exception as e:
+            self.logger.error(f"[ProgressiveUnfreezer] Error on_train_begin: {e}")
+
+
+    def on_epoch_begin(self, epoch, logs=None):
+        if not self.transformer_blocks:
+            return
+
+        try:
+            if epoch > 0 and epoch % self.interval == 0:
+                self.unfreeze_block_count += 1
+                unfreeze_upto = min(self.unfreeze_block_count, len(self.transformer_blocks))
+
+                if self.transformer_blocks[unfreeze_upto - 1].trainable:
+                    self.logger.info(f"[ProgressiveUnfreezer] Epoch {epoch+1}: Block {unfreeze_upto-1} already unfrozen.")
+                    return
+
+                block_to_unfreeze = self.transformer_blocks[unfreeze_upto - 1]
+                block_to_unfreeze.trainable = True
+                
+                self.logger.info(
+                    f"[ProgressiveUnfreezer] Epoch {epoch+1}: Unfreezing transformer block {len(self.transformer_blocks) - unfreeze_upto} ({block_to_unfreeze.name})"
+                )
+
+                # Re-compile to apply changes
+                self.model.compile(
+                    optimizer=self.model.optimizer,
+                    loss=self.model.loss,
+                    metrics=self.model.metrics,
+                )
+        except Exception as e:
+            self.logger.error(
+                f"[ProgressiveUnfreezer] Error during unfreezing at epoch {epoch+1}: {e}"
+            )
+
+--- END OF FILE cnn_base/Models/Transformers/Callbacks/progressive_unfreezer.py ---
+
+
+--- START OF FILE cnn_base/Tune_Hyperparameters/__init__.py ---
+
+from cnn_base.Tune_Hyperparameters.tuner import tune, save_tuner_results
+from cnn_base.Tune_Hyperparameters import strategies
+
+__all__ = ["tune", "strategies", "save_tuner_results"]
+
+--- END OF FILE cnn_base/Tune_Hyperparameters/__init__.py ---
+
+
+--- START OF FILE cnn_base/Tune_Hyperparameters/strategies.py ---
+
+from cnn_base.Models import CNN, Transformers
+
+"""
+Two examples are given for search spaces and strategies
+You can make your own here
+"""
+
+
+def A() -> tuple :
+    """
+    returns : tuple(a_function_defining_the_search_space, a_function_defining_strategy_for_tuning)
+    """
+    def search_space_A(hp):
+        """
+        Search space for a typical CNN fine-tuning task.
+        """
+        return {
+            "base_model_name": hp.Choice("base_model_name", values=["resnet50", "efficientnetb0", "mobilenetv2"]),
+            "learning_rate": hp.Float("learning_rate", min_value=1e-5, max_value=1e-3, sampling="log"),
+            "optimizer": hp.Choice("optimizer", values=["adam", "adamw", "sgd"]),
+            "unfreeze_layers": hp.Int("unfreeze_layers", min_value=10, max_value=50, step=10)
+        }
+
+    def strategy_A(model: CNN, hp, hps: dict):
+        """
+        Strategy for a CNN:
+        - Unfreezes the last N layers based on the hyperparameter search.
+        - Compiles with the chosen optimizer and learning rate.
+        """
+        model.freeze_all()
+        model.unfreeze_later_n(n=hps["unfreeze_layers"])
+        
+        model.compile(optimizer_config={
+            "name": hps["optimizer"],
+            "learning_rate": hps["learning_rate"]
+        })
+    return (search_space_A, strategy_A)
+
+def B() -> tuple :
+    """
+    returns : tuple(a_function_defining_the_search_space, a_function_defining_strategy_for_tuning)
+    """
+    def search_space_B(hp):
+        """
+        Search space for a Vision Transformer fine-tuning task.
+        """
+        return {
+            "base_model_name": "vit_base",
+            "unfreeze_blocks": hp.Int("unfreeze_blocks", min_value=1, max_value=4, step=1),
+            "use_llrd": hp.Boolean("use_llrd"),
+            "llrd_decay_rate": hp.Float("llrd_decay_rate", min_value=0.65, max_value=0.9, sampling="linear", parent_name="use_llrd", parent_values=[True]),
+            "head_lr_multiplier": hp.Float("head_lr_multiplier", min_value=1.5, max_value=5.0, sampling="linear", parent_name="use_llrd", parent_values=[True]),
+            "learning_rate": hp.Float("learning_rate", min_value=1e-5, max_value=8e-5, sampling="log"),
+            "weight_decay": hp.Float("weight_decay", min_value=1e-3, max_value=1e-1, sampling="log"),
+        }
+
+    def strategy_B(model: Transformers, hp, hps: dict):
+        """
+        Strategy for a Transformer:
+        - Unfreezes the last N transformer blocks.
+        - Decides whether to use Layer-wise Learning Rate Decay (LLRD).
+        - If LLRD is used, tunes its decay rate.
+        - If not, compiles with a standard AdamW optimizer.
+        """
+        model.unfreeze_last_n_blocks(n_blocks=hps["unfreeze_blocks"])
+        
+        if hps.get("use_llrd", False):
+            model.compile_with_llrd(
+                head_lr_multiplier=hps["head_lr_multiplier"],
+                decay_rate=hps["llrd_decay_rate"]
+            )
+        else:
+            model.compile(optimizer_config={
+                "name": "adamw",
+                "learning_rate": hps["learning_rate"],
+                "params": {"weight_decay": hps["weight_decay"]}
+            })
+    return (search_space_B, strategy_B)
+
+--- END OF FILE cnn_base/Tune_Hyperparameters/strategies.py ---
+
+
+--- START OF FILE cnn_base/Tune_Hyperparameters/tuner.py ---
+
+import pandas as pd
+import keras_tuner as kt
+import keras
+import os
+
+from cnn_base.Models import get_model
+from cnn_base.loggers import Logger
+from cnn_base.configs.base_config import STORAGE_DIR
+
+def save_tuner_results(tuner: kt.Tuner, project_name: str):
+    logger = Logger(name=f"TunerSaver-{project_name}")
+    
+    results_dir = os.path.join(STORAGE_DIR, "tuning_results")
+    os.makedirs(results_dir, exist_ok=True)
+    filepath = os.path.join(results_dir, f"{project_name}_results.csv")
+    
+    logger.info(f"Saving tuning results to {filepath}...")
+    
+    trials_data = []
+    for trial in tuner.oracle.get_best_trials(num_trials=len(tuner.oracle.trials)):
+        trial_dict = {
+            "trial_id": trial.trial_id,
+            "status": trial.status,
+            "score": trial.score
+        }
+        trial_dict.update(trial.hyperparameters.values)
+        trials_data.append(trial_dict)
+        
+    if not trials_data:
+        logger.warning("No trials found to save.")
+        return
+
+    results_df = pd.DataFrame(trials_data)
+    results_df.to_csv(filepath, index=False)
+    logger.info("Tuning results saved successfully.")
+
+
+def tune(strategy_function, search_space_fn, train_data, validation_data, project_name):
+    """
+    A generic function to run a KerasTuner search.
+
+    Args:
+        strategy_function (function) : A function that takes a Model instance and an hp object
+                                      and executes the fine-tuning steps.
+        search_space_function (function) : A function that takes an hp object and defines the
+                                    hyperparameter search space.
+        You can find examples for both types in Tune_Hyperparameters/strategies.py
+
+        train_data: Training data (e.g., (X_train, y_train)).
+        val_data: Validation data (e.g., (X_val, y_val)).
+        project_name (str): Name for the tuning project directory.
+    """
+    logger = Logger(name=f"KerasTuner-{project_name}")
+
+    def build_model(hp):
+        hyperparameters = search_space_fn(hp)
+        base_model_name = hyperparameters.pop("base_model_name")
+        
+        model_wrapper = get_model(base_model_name)
+        strategy_function(model_wrapper, hp, hyperparameters)
+        
+        if model_wrapper.model is None or not model_wrapper.model.compiled_loss:
+            error_msg = "The model strategy function did not build and compile the model."
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        
+        return model_wrapper.model
+
+    tuner = kt.Hyperband(
+        hypermodel=build_model,
+        objective="val_accuracy",
+        max_epochs=20,
+        factor=3,
+        directory="tuning_results",
+        project_name=project_name,
+        overwrite=True
+    )
+
+    stop_early = keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+    
+    logger.info(f"--- Starting hyperparameter search for '{project_name}' ---")
+    tuner.search(train_data, validation_data=validation_data, callbacks=[stop_early])
+    logger.info(f"--- Search complete for '{project_name}' ---")
+    
+    try:
+        best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+        logger.info("Best Hyperparameters found:")
+        for key, value in best_hps.values.items():
+            logger.info(f"  - {key}: {value}")
+    except IndexError:
+        logger.warning("Could not retrieve best hyperparameters. The search may have failed.")
+    
+    save_tuner_results(tuner, project_name)
+            
+    return tuner
+
+--- END OF FILE cnn_base/Tune_Hyperparameters/tuner.py ---
+
+
+--- START OF FILE cnn_base/utils/__init__.py ---
+
+from cnn_base.utils.visualization import Visualizer
+
+__all__ = ["Visualizer",]
+
+--- END OF FILE cnn_base/utils/__init__.py ---
+
+
+--- START OF FILE cnn_base/utils/devtools.py ---
+
+def enable_autoreload():
+    """Enable autoreload if running in IPython/Jupyter."""
+    try:
+        from IPython import get_ipython
+        ipy = get_ipython()
+        if ipy is not None:
+            ipy.run_line_magic("load_ext", "autoreload")
+            ipy.run_line_magic("autoreload", "2")
+            print("Edit mode: autoreload enabled")
+    except Exception as e:
+        print(f"Failed to enable autoreload: {e}")
+
+--- END OF FILE cnn_base/utils/devtools.py ---
+
+
+--- START OF FILE cnn_base/utils/visualization.py ---
+
+# utils/visualization.py
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from keras import layers
+import tensorflow as tf
+
+from sklearn.metrics import (
+    confusion_matrix, roc_curve, auc, precision_recall_curve,
+    average_precision_score, classification_report
+)
+import math
+import os
+from cnn_base.loggers import Logger
+from cnn_base.Models.base_model import Base_Model
+
+
+class Visualizer:
+    def __init__(self, logger = None):
+        if not logger :
+            logger = Logger("Visualization_Logger", "visualization_info.log", "visualization_error.log")
+        self.logger = logger
+
+    # --------------------------- MUST HAVE --------------------------- #
+    def plot_confusion_matrix(self, y_true, y_pred, class_names=None, normalize=False, filepath=None):
+        """
+        **Description:**
+        Plots a confusion matrix heatmap using Seaborn and saves to file.
+
+        **Parameters:**
+        - y_true: array-like, true labels.
+        - y_pred: array-like, predicted labels.
+        - class_names: list of strings, optional class names for axes.
+        - normalize: bool, if True normalizes the confusion matrix.
+        - filepath: str, path to save the plot.
+
+        **Example:**
+        ```python
+        visualizer.plot_confusion_matrix(y_true=y_test, y_pred=y_pred, class_names=class_names, filepath="confusion_matrix.png")
+        ```
+        """
+        try:
+            cm = confusion_matrix(y_true, y_pred)
+            if normalize:
+                cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(
+                cm,
+                annot=True,
+                fmt=".2f" if normalize else "d",
+                cmap="Blues",
+                xticklabels=class_names if class_names else "auto",
+                yticklabels=class_names if class_names else "auto",
+            )
+            plt.title("Confusion Matrix")
+            plt.ylabel("True Label")
+            plt.xlabel("Predicted Label")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Confusion matrix saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+            return cm
+        except Exception as e:
+            self.logger.error(f"Error plotting confusion matrix: {e}")
+            return None
+
+    def plot_roc_curve(self, y_true, y_prob, n_classes=2, filepath=None):
+        """
+        **Description:**
+        Plots the ROC curve for binary or multi-class classification and saves to file.
+
+        **Parameters:**
+        - y_true: array-like, true labels.
+        - y_prob: array-like, predicted probabilities.
+        - n_classes: int, number of classes.
+        - filepath: str, path to save the plot.
+
+        **Example:**
+        ```python
+        visualizer.plot_roc_curve(y_true=y_test, y_prob=y_prob, n_classes=4, filepath="roc_curve.png")
+        ```
+        """
+        try:
+            plt.figure(figsize=(8, 6))
+            if n_classes == 2:
+                fpr, tpr, _ = roc_curve(y_true, y_prob[:, 1])
+                auc_score = auc(fpr, tpr)
+                plt.plot(fpr, tpr, label=f"ROC Curve (AUC={auc_score:.2f})")
+            else:
+                for i in range(n_classes):
+                    fpr, tpr, _ = roc_curve((y_true == i).astype(int), y_prob[:, i])
+                    auc_score = auc(fpr, tpr)
+                    plt.plot(fpr, tpr, label=f"Class {i} (AUC={auc_score:.2f})")
+
+            plt.plot([0, 1], [0, 1], "k--")
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.title("ROC Curve")
+            plt.legend(loc="lower right")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"ROC curve saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting ROC curve: {e}")
+
+    def plot_precision_recall(self, y_true, y_prob, n_classes=2, filepath=None):
+        """
+        **Description:**
+        Plots the precision-recall curve for binary or multi-class classification and saves to file.
+
+        **Parameters:**
+        - y_true: array-like, true labels.
+        - y_prob: array-like, predicted probabilities.
+        - n_classes: int, number of classes.
+        - filepath: str, path to save the plot.
+
+        **Example:**
+        ```python
+        visualizer.plot_precision_recall(y_true=y_test, y_prob=y_prob, n_classes=4, filepath="precision_recall.png")
+        ```
+        """
+        try:
+            plt.figure(figsize=(8, 6))
+            if n_classes == 2:
+                precision, recall, _ = precision_recall_curve(y_true, y_prob[:, 1])
+                ap = average_precision_score(y_true, y_prob[:, 1])
+                plt.plot(recall, precision, label=f"AP={ap:.2f}")
+            else:
+                for i in range(n_classes):
+                    precision, recall, _ = precision_recall_curve((y_true == i).astype(int), y_prob[:, i])
+                    ap = average_precision_score((y_true == i).astype(int), y_prob[:, i])
+                    plt.plot(recall, precision, label=f"Class {i} (AP={ap:.2f})")
+
+            plt.xlabel("Recall")
+            plt.ylabel("Precision")
+            plt.title("Precision-Recall Curve")
+            plt.legend(loc="best")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Precision-Recall curve saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting Precision-Recall curve: {e}")
+
+    # --------------------------- NICE TO HAVE --------------------------- #
+    def plot_training_history(self, history, filepath=None):
+        """
+        **Description:**
+        Plots training and validation accuracy and loss over epochs and saves to file.
+
+        **Parameters:**
+        - history: Keras History object.
+        - filepath: str, path to save the plot.
+
+        **Example:**
+        ```python
+        visualizer.plot_training_history(history, filepath="training_history.png")
+        ```
+        """
+        try:
+            acc = history.history.get("accuracy", [])
+            val_acc = history.history.get("val_accuracy", [])
+            loss = history.history.get("loss", [])
+            val_loss = history.history.get("val_loss", [])
+            params = {}
+
+            plt.figure(figsize=(12, 5))
+            plt.subplot(1, 2, 1)
+            plt.plot(acc, label="train acc", marker=".", **params.get("accuracy", {}))
+            if val_acc:
+                plt.plot(val_acc, label="val acc", **params.get("val_accuracy", {}))
+            plt.legend()
+            plt.title("Accuracy")
+
+            plt.subplot(1, 2, 2)
+            plt.plot(loss, label="train loss", **params.get("loss", {}))
+            if val_loss:
+                plt.plot(val_loss, label="val loss", **params.get("val_loss", {}))
+            plt.legend()
+            plt.title("Loss")
+
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Training history saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting training history: {e}")
+
+    def plot_classwise_metrics(self, y_true, y_pred, class_names=None, filepath=None):
+        """
+        **Description:**
+        Plots precision, recall, and F1-score for each class and saves to file.
+
+        **Parameters:**
+        - y_true: array-like, true labels.
+        - y_pred: array-like, predicted labels.
+        - class_names: list of strings, optional class names.
+        - filepath: str, path to save the plot.
+
+        **Example:**
+        ```python
+        visualizer.plot_classwise_metrics(y_true=y_test, y_pred=y_pred, class_names=class_names, filepath="classwise_metrics.png")
+        ```
+        """
+        try:
+            report = classification_report(
+                y_true,
+                y_pred,
+                target_names=class_names if class_names else None,
+                output_dict=True
+            )
+            classes = class_names if class_names else list(report.keys())[:-3]
+            precision = [report[c]['precision'] for c in classes]
+            recall = [report[c]['recall'] for c in classes]
+            f1 = [report[c]['f1-score'] for c in classes]
+
+            df = {
+                "Class": classes,
+                "Precision": precision,
+                "Recall": recall,
+                "F1-Score": f1
+            }
+
+            plt.figure(figsize=(10, 6))
+            sns.barplot(x="Class", y="value", hue="variable",
+                        data=pd.melt(pd.DataFrame(df), ["Class"]))
+            plt.title("Class-wise Metrics")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Classwise metrics saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting classwise metrics: {e}")
+
+    def plot_confidence_histogram(self, y_prob, bins=20, filepath=None):
+        """
+        Plots a histogram of prediction confidence (max probability per sample) and saves to file.
+
+        **Parameters**
+        * `y_prob` : array-like
+        Predicted probabilities.
+        * `bins` : int, default=20
+        Number of bins in histogram.
+        * `filepath` : str, path to save the plot.
+
+        **Example**
+        ```python
+        visualizer.plot_confidence_histogram(y_prob, bins=20, filepath="confidence_histogram.png")
+        ```
+        """
+        try:
+            confidences = np.max(y_prob, axis=1)
+            sns.histplot(confidences, bins=bins, kde=True)
+            plt.xlabel("Prediction Confidence")
+            plt.ylabel("Frequency")
+            plt.title("Prediction Confidence Histogram")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Confidence histogram saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting confidence histogram: {e}")
+
+    def plot_cumulative_gain(self, y_true, y_prob, filepath=None):
+        """
+        **Description:**
+        Plots cumulative gain curve and saves to file.
+
+        **Parameters:**
+        - y_true: array-like, true labels.
+        - y_prob: array-like, predicted probabilities.
+        - filepath: str, path to save the plot.
+
+        **Example:**
+        ```python
+        y_prob = model.predict(X_test)[:, 1]  # For binary classification
+        visualizer.plot_cumulative_gain(y_true=y_test, y_prob=y_prob, filepath="cumulative_gain.png")
+        ```
+        """
+        try:
+            order = np.argsort(y_prob)[::-1]
+            y_true_sorted = np.array(y_true)[order]
+            cum_gains = np.cumsum(y_true_sorted) / np.sum(y_true_sorted)
+            percentages = np.arange(1, len(y_true) + 1) / len(y_true)
+
+            plt.figure(figsize=(8, 6))
+            plt.plot(percentages, cum_gains, label="Model")
+            plt.plot([0, 1], [0, 1], "--", label="Random")
+            plt.xlabel("Proportion of sample")
+            plt.ylabel("Cumulative Gain")
+            plt.title("Cumulative Gain Curve")
+            plt.legend()
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Cumulative Gain curve saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting cumulative gain curve: {e}")
+
+    def plot_grad_cam(self, model, img_array, last_conv_layer_name, original_img=None, alpha=0.4, filepath=None):
+        """
+        Plots Grad-CAM heatmap for a CNN model and saves to file.
+
+        **Parameters**
+        * `model` : keras.Model
+        Trained model.
+        * `img_array` : np.ndarray
+        Preprocessed input image array of shape (1, H, W, C).
+        * `last_conv_layer_name` : str
+        Name of the last convolutional layer.
+        * `original_img` : np.ndarray, optional
+        Raw image for overlay. Defaults to `img_array[0]`.
+        * `alpha` : float, default=0.4
+        Weight of heatmap overlay.
+        * `filepath` : str, path to save the plot.
+
+        **Example**
+        ```python
+        visualizer.plot_grad_cam(model, img_array, last_conv_layer_name='conv5_block3_out', original_img=img, filepath="grad_cam.png")
+        ```
+        """
+        try:
+            import cv2
+            grad_model = tf.keras.models.Model(
+                [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
+            )
+            with tf.GradientTape() as tape:
+                conv_outputs, predictions = grad_model(img_array)
+                pred_index = tf.argmax(predictions[0])
+                loss = predictions[:, pred_index]
+
+            grads = tape.gradient(loss, conv_outputs)[0]
+            pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+            heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1).numpy()
+            heatmap = np.maximum(heatmap, 0) / (np.max(heatmap) + 1e-8)
+            
+            img = original_img if original_img is not None else img_array[0]
+            heatmap = cv2.resize(heatmap, (img.shape[1], img.shape[0]))
+            heatmap = np.uint8(255 * heatmap)
+            heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+            
+            superimposed_img = cv2.addWeighted(img.astype('uint8'), 1, heatmap.astype('uint8'), alpha, 0)
+
+            plt.figure(figsize=(8, 8))
+            plt.imshow(superimposed_img)
+            plt.axis("off")
+            plt.title("Grad-CAM")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Grad-CAM saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting Grad-CAM: {e}")
+
+    def plot_attention_maps(self, model, preprocessed_image, target_size, filepath=None):
+        """
+        Visualizes the attention maps from a Vision Transformer model and saves to file.
+        
+        Args:
+            model (tf.keras.Model): The trained transformer model.
+            preprocessed_image (np.ndarray): A single preprocessed image with batch dimension (1, H, W, C).
+            target_size (tuple): The (height, width) of the original image for resizing maps.
+            filepath (str): Path to save the plot.
+        """
+        self.logger.info("Attempting to visualize attention maps...")
+        try:
+            outputs = [layer.output for layer in model.layers if "attention" in layer.name.lower() and hasattr(layer, 'attention_scores')]
+            
+            if not outputs:
+                 outputs = [layer.output for layer in model.layers if isinstance(layer, layers.MultiHeadAttention)]
+
+            if not outputs:
+                self.logger.error("Could not find any attention layers in the model.")
+                return
+
+            attention_model = tf.keras.Model(inputs=model.inputs, outputs=outputs)
+            
+            att_maps = attention_model.predict(preprocessed_image)
+            
+            last_layer_maps = att_maps[-1]
+
+            # Shape is likely (batch_size, num_heads, sequence_len, sequence_len)
+            # We are interested in the attention from the [CLS] token to other patches
+            cls_token_attention = last_layer_maps[0, :, 0, 1:] # Exclude CLS token itself
+            
+            num_heads = cls_token_attention.shape[0]
+            num_patches = cls_token_attention.shape[1]
+            patch_dim = int(math.sqrt(num_patches))
+            
+            if patch_dim * patch_dim != num_patches:
+                self.logger.error(f"Cannot form a square grid from {num_patches} patches.")
+                return
+
+            # Plot all heads
+            fig, axes = plt.subplots(math.ceil(num_heads / 4), 4, figsize=(12, 12))
+            fig.suptitle("Attention Maps from CLS Token (Last Layer)")
+            axes = axes.ravel()
+            
+            for i in range(num_heads):
+                ax = axes[i]
+                attention_grid = cls_token_attention[i].reshape(patch_dim, patch_dim)
+                im = ax.imshow(attention_grid, cmap='viridis')
+                ax.set_title(f'Head {i+1}')
+                ax.axis('off')
+            
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"Attention maps saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Failed to plot attention maps: {e}")
+
+
+    def plot_embeddings(self, model=None, layer_name=None, data=None, labels=None, method="tsne", features=None, random_state=42, filepath=None):
+        """
+        Visualizes embeddings from a model layer using t-SNE or UMAP and saves to file.
+
+        **Parameters**
+        * `model` : keras.Model, optional
+        Model instance to extract features. Required if `features` not provided.
+        * `layer_name` : str, optional
+        Name of layer to extract embeddings from. Required if `features` not provided.
+        * `data` : np.ndarray or tf.data.Dataset, optional
+        Input images for feature extraction. Required if `features` not provided.
+        * `labels` : array-like, optional
+        Labels for coloring points.
+        * `method` : str, default="tsne"
+        Dimensionality reduction method: "tsne" or "umap".
+        * `features` : np.ndarray, optional
+        Precomputed embeddings to visualize.
+        * `random_state` : int, default=42
+        Random seed for reproducibility.
+        * `filepath` : str, path to save the plot.
+
+        **Example**
+        ```python
+        features, reduced = visualizer.plot_embeddings(
+            model=model,
+            layer_name='fc1',
+            data=X_test,
+            labels=y_test,
+            method='tsne',
+            filepath='embeddings.png'
+        )
+        ```
+        """
+        try:
+            from sklearn.manifold import TSNE
+            import umap
+            
+            # Extract features if model is provided
+            if features is None:
+                if model is None or layer_name is None or data is None:
+                    raise ValueError("Either provide features directly, or model, layer_name, and data.")
+                
+                intermediate_layer_model = tf.keras.Model(
+                    inputs=model.inputs,
+                    outputs=model.get_layer(layer_name).output
+                )
+
+                if isinstance(data, tf.data.Dataset):
+                    features_list = []
+                    for batch in data:
+                        x_batch = batch[0] if isinstance(batch, tuple) else batch
+                        features_list.append(intermediate_layer_model.predict(x_batch))
+                    features = np.concatenate(features_list, axis=0)
+                else:
+                    features = intermediate_layer_model.predict(data, batch_size = 32   )
+
+                if len(features.shape) > 2:
+                    features = features.reshape(features.shape[0], -1)
+
+            # Dimensionality reduction
+            if method.lower() == "tsne":
+                reducer = TSNE(n_components=2, random_state=random_state)
+            elif method.lower() == "umap":
+                reducer = umap.UMAP(n_components=2, random_state=random_state)
+            else:
+                raise ValueError("method must be 'tsne' or 'umap'")
+
+            reduced = reducer.fit_transform(features)
+
+            # Plot using matplotlib instead of plotly for easier saving
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(reduced[:, 0], reduced[:, 1], c=labels, cmap='viridis', alpha=0.7)
+            plt.colorbar(scatter)
+            plt.title(f"{method.upper()} Embeddings")
+            plt.xlabel("Component 1")
+            plt.ylabel("Component 2")
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"{method.upper()} embeddings saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+
+            return features, reduced
+
+        except Exception as e:
+            self.logger.error(f"Error plotting embeddings: {e}")
+            return None, None
+    
+     # ------------------- EXPLAINABLE AI (XAI) METHODS ------------------- #
+
+    def plot_lime_explanation(self, model, image, num_features=5, hide_rest=True, filepath=None):
+        """
+        Visualizes the LIME explanation for a single image prediction and saves to file.
+
+        **Parameters**
+            model: The trained model.
+            image (np.ndarray): The input image as a NumPy array.
+            num_features (int): The number of superpixels to highlight.
+            hide_rest (bool): If True, greys out the rest of the image.
+            filepath (str): Path to save the plot.
+
+        **Example**
+        ```python
+        visualizer.plot_lime_explanation(model, image=X_test[0], num_features=5, hide_rest=True, filepath="lime_explanation.png")
+        ```
+        """
+        try:
+            from lime import lime_image
+            from skimage.segmentation import mark_boundaries
+
+            self.logger.info("Generating LIME explanation...")
+            explainer = lime_image.LimeImageExplainer()
+
+            # LIME needs a function that takes a NumPy array of images and returns predictions
+            def predict_fn(images):
+                return model.predict(images)
+
+            explanation = explainer.explain_instance(
+                image.astype('double'),
+                predict_fn,
+                top_labels=1,
+                hide_color=0,
+                num_samples=1000  # Number of perturbed samples to generate
+            )
+
+            # Get the explanation for the top class
+            temp, mask = explanation.get_image_and_mask(
+                explanation.top_labels[0],
+                positive_only=True,
+                num_features=num_features,
+                hide_rest=hide_rest
+            )
+
+            # Plot the explanation
+            plt.figure(figsize=(6, 6))
+            plt.imshow(mark_boundaries(temp / 2 + 0.5, mask))
+            plt.title("LIME Explanation")
+            plt.axis('off')
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"LIME explanation saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+        except Exception as e:
+            self.logger.error(f"Error plotting LIME explanation: {e}")
+
+    def plot_shap_explanation(self, model, background_data, images_to_explain, class_names=None, filepath=None):
+        """
+        Visualizes SHAP explanations for one or more images and saves to file.
+
+        **Parameters**
+            model: The trained model.
+            background_data (np.ndarray): A subset of the training data to use as a background for SHAP.
+            images_to_explain (np.ndarray): A single image or a batch of images to explain.
+            class_names (list of str): A list of class names for the plot labels.
+            filepath (str): Path to save the plot.
+
+        **Example**
+        ```python
+        visualizer.plot_shap_explanation(model, background_data=X_train[:100], images_to_explain=X_test[:5], class_names=class_names, filepath="shap_explanation.png")
+        ```
+        """
+        try:
+            import shap
+            self.logger.info("Generating SHAP explanations...")
+
+            explainer = shap.DeepExplainer(model, background_data)
+
+            if len(images_to_explain.shape) == 3:
+                images_to_explain = np.expand_dims(images_to_explain, axis=0)
+
+            shap_values = explainer.shap_values(images_to_explain)
+            
+            # shap_values_transposed = [np.transpose(shap_values[i], (0, 2, 1, 3)) for i in range(len(shap_values))]
+            # shap_values_for_plot = np.transpose(np.array(shap_values_transposed), (1, 2, 3, 4, 0))
+
+            plt.figure(figsize=(12, 8))
+            
+            shap.image_plot(
+                shap_values,
+                # shap_values_for_plot,
+                images_to_explain,  # Pass the original images, not negative ones
+                # -images_to_explain,  # SHAP expects the original image values
+                labels=np.array([class_names] * len(images_to_explain)) if class_names else None,
+                show = False
+            )
+            
+            if filepath:
+                plt.savefig(filepath, bbox_inches='tight', dpi=300)
+                self.logger.info(f"SHAP explanations saved to {filepath}")
+            else:
+                plt.show()
+            plt.close()
+
+        except Exception as e:
+            self.logger.error(f"Error plotting SHAP explanations: {e}")
+    
+    # ------------------- CROSS-VALIDATION VISUALIZATION METHODS ------------------- #
+
+    def create_cv_plots(self, model_wrapper : Base_Model, X_val, y_val, y_pred_prob, history, fold_dir, cnn_model=True, class_names=None, 
+                       create_xai_plots=True, create_embedding_plots=True, background_data=None, verbose = 0):
+        """
+        Create all visualization plots for a cross-validation fold and save to directory.
+        
+        Parameters:
+        - model_wrapper: The model wrapper containing the trained model
+        - X_val: Validation features
+        - y_val: Validation labels
+        - history: Training history object
+        - fold_dir: Directory to save plots for this fold
+        - cnn_model: bool, if True creates CNN-specific plots, else transformer-specific plots
+        - class_names: List of class names for labeling
+        - create_xai_plots: bool, whether to create XAI plots (LIME, SHAP)
+        - create_embedding_plots: bool, whether to create embedding plots
+        - background_data: Background data for SHAP explanations
+        """
+        try:
+            y_true = np.argmax(y_val, axis=1) if len(y_val.shape) > 1 else y_val
+            # y_pred_prob = model_wrapper.predict(X_val)
+            y_pred = np.argmax(y_pred_prob, axis=1)
+            
+            n_classes = y_pred_prob.shape[1] if len(y_pred_prob.shape) > 1 else 2
+            os.makedirs(fold_dir, exist_ok=True)
+            
+            self.logger.info("Using data subsets for memory-intensive XAI and embedding plots.")
+            xai_subset_size = 50
+            embedding_subset_size = 200
+
+            background_data = background_data if len(background_data) <= xai_subset_size else background_data[:xai_subset_size]
+            
+            # Basic plots for all models
+            self.plot_confusion_matrix(
+                y_true, y_pred, class_names=class_names, 
+                filepath=os.path.join(fold_dir, "confusion_matrix.png")
+            )
+            
+            self.plot_roc_curve(
+                y_true, y_pred_prob, n_classes=n_classes,
+                filepath=os.path.join(fold_dir, "roc_curve.png")
+            )
+            
+            self.plot_precision_recall(
+                y_true, y_pred_prob, n_classes=n_classes,
+                filepath=os.path.join(fold_dir, "precision_recall.png")
+            )
+            
+            self.plot_training_history(
+                history, 
+                filepath=os.path.join(fold_dir, "training_history.png")
+            )
+            
+            self.plot_classwise_metrics(
+                y_true, y_pred, class_names=class_names,
+                filepath=os.path.join(fold_dir, "classwise_metrics.png")
+            )
+            
+            self.plot_confidence_histogram(
+                y_pred_prob,
+                filepath=os.path.join(fold_dir, "confidence_histogram.png")
+            )
+            
+            if n_classes == 2 :
+                self.plot_cumulative_gain(
+                    y_true, y_pred_prob[:, 1],
+                    filepath=os.path.join(fold_dir, "cumulative_gain.png")
+                )
+            
+            # Model-specific plots
+            if cnn_model:
+                self._create_cnn_specific_plots(model_wrapper, X_val, fold_dir)
+            else:
+                self._create_transformer_specific_plots(model_wrapper, X_val, fold_dir)
+            
+            # XAI plots
+            if create_xai_plots:
+                self._create_xai_plots(model_wrapper, X_val[:xai_subset_size], fold_dir, background_data, class_names)
+            
+            # Embedding plots
+            # if create_embedding_plots:
+                # self._create_embedding_plots(model_wrapper, X_val[:embedding_subset_size], y_true[:embedding_subset_size], fold_dir)
+                
+            self.logger.info(f"All plots saved to {fold_dir}")
+            
+        except Exception as e:
+            self.logger.error(f"Error creating cross-validation plots: {e}")
+
+    def _create_cnn_specific_plots(self, model_wrapper, X_val, fold_dir):
+        """Create CNN-specific visualization plots."""
+        try:
+            # Try to create Grad-CAM for a sample image
+            if len(X_val) > 0:
+                sample_idx = 0
+                sample_image = X_val[sample_idx:sample_idx+1]
+                
+                # Find convolutional layers for Grad-CAM
+                conv_layers = [layer.name for layer in model_wrapper.model.layers 
+                             if isinstance(layer, layers.Conv2D)]
+                
+                if conv_layers:
+                    last_conv_layer = conv_layers[-1]
+                    self.plot_grad_cam(
+                        model_wrapper.model, sample_image, last_conv_layer,
+                        filepath=os.path.join(fold_dir, "grad_cam.png")
+                    )
+        except Exception as e:
+            self.logger.warning(f"Could not create CNN-specific plots: {e}")
+
+    def _create_transformer_specific_plots(self, model_wrapper, X_val, fold_dir):
+        """Create transformer-specific visualization plots."""
+        try:
+            # Try to create attention maps for a sample image
+            if len(X_val) > 0:
+                sample_idx = 0
+                sample_image = X_val[sample_idx:sample_idx+1]
+                
+                self.plot_attention_maps(
+                    model_wrapper.model, sample_image, 
+                    target_size=(224, 224),  # Adjust based on your model
+                    filepath=os.path.join(fold_dir, "attention_maps.png")
+                )
+        except Exception as e:
+            self.logger.warning(f"Could not create transformer-specific plots: {e}")
+
+    def _create_xai_plots(self, model_wrapper, X_val, fold_dir, background_data, class_names):
+        """Create XAI (LIME and SHAP) plots."""
+        try:
+            if len(X_val) > 0:
+                # LIME explanation for a sample image
+                sample_idx = 0
+                sample_image = X_val[sample_idx]
+                
+                self.plot_lime_explanation(
+                    model_wrapper.model, sample_image,
+                    filepath=os.path.join(fold_dir, "lime_explanation.png")
+                )
+                
+                # # SHAP explanations (use a small subset for performance)
+                # if background_data is not None and len(X_val) >= 3:
+                #     shap_samples = X_val[:3]  # Use first 3 samples for SHAP
+                #     self.plot_shap_explanation(
+                #         model_wrapper.model, background_data, shap_samples, class_names,
+                #         filepath=os.path.join(fold_dir, "shap_explanation.png")
+                #     )
+                    
+        except Exception as e:
+            self.logger.warning(f"Could not create XAI plots: {e}")
+
+    def _create_embedding_plots(self, model_wrapper, X_val, y_true, fold_dir):
+        """Create embedding visualization plots."""
+        try:
+            if len(X_val) > 0:
+                # Try to find suitable layers for embedding extraction
+                embedding_layers = []
+                for layer in model_wrapper.model.layers:
+                    # layer_name = layer.name.lower()
+                    # Look for dense, embedding, or flatten layers
+                    if isinstance(layer, (layers.Dense, layers.Embedding, layers.Flatten, layers.GlobalAveragePooling1D, layers.GlobalAveragePooling2D)):
+                        try :
+                            if len(layer.output_shape) == 2:  # 2D output suitable for embeddings
+                                embedding_layers.append(layer.name)
+                        except :
+                            pass
+                
+                if embedding_layers:
+                    # Use the last suitable layer
+                    embedding_layer = embedding_layers[-1]
+                    
+                    # Create t-SNE embeddings
+                    self.plot_embeddings(
+                        model=model_wrapper.model,
+                        layer_name=embedding_layer,
+                        data=X_val[:100],  # Use subset for performance
+                        labels=y_true[:100],
+                        method="tsne",
+                        filepath=os.path.join(fold_dir, "tsne_embeddings.png")
+                    )
+                    
+                    # Create UMAP embeddings
+                    self.plot_embeddings(
+                        model=model_wrapper.model,
+                        layer_name=embedding_layer,
+                        data=X_val[:100],
+                        labels=y_true[:100],
+                        method="umap",
+                        filepath=os.path.join(fold_dir, "umap_embeddings.png")
+                    )
+                    
+        except Exception as e:
+            self.logger.warning(f"Could not create embedding plots: {e}")
+
+--- END OF FILE cnn_base/utils/visualization.py ---

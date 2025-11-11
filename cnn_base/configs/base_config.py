@@ -154,8 +154,7 @@ def create_default_metrics(num_classes : int) -> list[keras.metrics.Metric] :
         get_auc(num_classes=num_classes, name="auc")
     ]
 
-def save_data(save_dir : str = None) :
-    path = save_dir or os.getcwd()
+def save_data() :
     import zipfile
 
     with zipfile.ZipFile(f"storage__{os.path.basename(STORAGE_DIR)}.zip", "w", zipfile.ZIP_DEFLATED) as f :
