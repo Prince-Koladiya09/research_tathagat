@@ -10,6 +10,10 @@ pillow
 keras_tuner
 pydantic
 tensorflow_hub
+torch
+torchvision
+timm
+torchinfo
 
 # Extras
 # For Grad-CAM visualization

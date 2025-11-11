@@ -32,10 +32,10 @@ _HUB_URLS = {
     "bit_r152x4": "https://tfhub.dev/google/bit/m-r152x4/1",
     "noisy_student_efficientnet_l2": "https://tfhub.dev/google/efficientnet/noisy-student/l2/feature-vector/1",
     "noisy_student_efficientnet_b1": "https://tfhub.dev/google/efficientnet/noisy-student/b1/feature-vector/1",
-    "noisy_student_efficientnet_b2": "https://tfhub.dev/google/efficientnet/noisy-student/b2/feature-vector/1",
-    "noisy_student_efficientnet_b3": "https://tfhub.dev/google/efficientnet/noisy-student/b3/feature-vector/1",
+    # "noisy_student_efficientnet_b2": "https://tfhub.dev/google/efficientnet/noisy-student/b2/feature-vector/1",
+    # "noisy_student_efficientnet_b3": "https://tfhub.dev/google/efficientnet/noisy-student/b3/feature-vector/1",
     "noisy_student_efficientnet_b4": "https://tfhub.dev/google/efficientnet/noisy-student/b4/feature-vector/1",
-    "noisy_student_efficientnet_b5": "https://tfhub.dev/google/efficientnet/noisy-student/b5/feature-vector/1",
+    # "noisy_student_efficientnet_b5": "https://tfhub.dev/google/efficientnet/noisy-student/b5/feature-vector/1",
     "noisy_student_efficientnet_b6": "https://tfhub.dev/google/efficientnet/noisy-student/b6/feature-vector/1",
     "hrnet": "https://www.kaggle.com/models/rishitdagli/hrnet-tf/frameworks/TensorFlow2/variations/hrnet-w18-imagenet-classification/versions/1",
 }

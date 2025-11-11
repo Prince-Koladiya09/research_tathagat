@@ -14,6 +14,9 @@ import math
 import os
 from cnn_base.loggers import Logger
 from cnn_base.Models.base_model import Base_Model
+import torch
+from cnn_base.Models.PyTorch.model import PyTorch_Model
+from cnn_base.Models.CNN.model import Model as CNN_Model
 
 
 class Visualizer:
@@ -641,11 +644,118 @@ class Visualizer:
 
         except Exception as e:
             self.logger.error(f"Error plotting SHAP explanations: {e}")
+        
+    # --- NEW METHOD: Grad-CAM for PyTorch ---
+    def plot_grad_cam_pytorch(self, model, input_tensor, filepath=None):
+        model.eval()
+        target_layer = None
+        # Find the last convolutional layer in the base model
+        if hasattr(model, '0'): # If it's a Sequential model
+            for layer in reversed(list(model[0].modules())):
+                if isinstance(layer, torch.nn.Conv2d):
+                    target_layer = layer
+                    break
+        if not target_layer:
+            self.logger.error("Could not find a target Conv2d layer for PyTorch Grad-CAM.")
+            return
+
+        gradients = []
+        activations = []
+        def backward_hook(module, grad_input, grad_output):
+            gradients.append(grad_output[0])
+        def forward_hook(module, input, output):
+            activations.append(output)
+
+        target_layer.register_forward_hook(forward_hook)
+        target_layer.register_backward_hook(backward_hook)
+        
+        output = model(input_tensor.to(next(model.parameters()).device))
+        pred_class_idx = output.argmax(dim=1).item()
+        
+        model.zero_grad()
+        output[0][pred_class_idx].backward()
+        
+        pooled_gradients = torch.mean(gradients[0], dim=[0, 2, 3])
+        activation_map = activations[0].detach()
+        
+        for i in range(pooled_gradients.shape[0]):
+            activation_map[:, i, :, :] *= pooled_gradients[i]
+            
+        heatmap = torch.mean(activation_map, dim=1).squeeze().cpu().numpy()
+        heatmap = np.maximum(heatmap, 0)
+        heatmap /= np.max(heatmap)
+        
+        # Superimpose heatmap on original image
+        import cv2
+        img = input_tensor[0].permute(1, 2, 0).numpy()
+        img = (img * 255).astype(np.uint8)
+        heatmap = cv2.resize(heatmap, (img.shape[1], img.shape[0]))
+        heatmap = np.uint8(255 * heatmap)
+        heatmap_jet = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        superimposed_img = cv2.addWeighted(img, 0.6, heatmap_jet, 0.4, 0)
+
+        plt.figure(figsize=(8, 8))
+        plt.imshow(cv2.cvtColor(superimposed_img, cv2.COLOR_BGR2RGB))
+        plt.axis('off')
+        plt.title(f"Grad-CAM (PyTorch) - Pred: {pred_class_idx}")
+        
+        if filepath:
+            plt.savefig(filepath, bbox_inches='tight')
+        plt.close()
+
+    # --- NEW METHOD: Attention Maps for PyTorch/timm ---
+    def plot_attention_maps_pytorch(self, model, input_tensor, filepath=None):
+        # Timm models have a great hook for this
+        if not hasattr(model[0], 'blocks'):
+            self.logger.warning("Model does not have a standard 'blocks' attribute for attention visualization.")
+            return
+            
+        from timm.models.vision_transformer import Attention
+        
+        # Create hooks to capture the attention maps from the last block
+        feat_out = {}
+        def hook_fn(module, input, output):
+            feat_out['attn'] = output
+
+        last_block = model[0].blocks[-1]
+        for name, module in last_block.named_modules():
+            if isinstance(module, Attention):
+                module.attn_drop.register_forward_hook(hook_fn)
+                break
+        
+        model.eval()
+        with torch.no_grad():
+            output = model(input_tensor.to(next(model.parameters()).device))
+        
+        attn_maps = feat_out.get('attn')
+        if attn_maps is None:
+            self.logger.error("Failed to capture attention maps.")
+            return
+            
+        # (batch, heads, tokens, tokens) -> we want CLS token attention
+        cls_attn = attn_maps[0, :, 0, 1:].detach().cpu().numpy() # (heads, patches)
+        num_heads, num_patches = cls_attn.shape
+        grid_size = int(np.sqrt(num_patches))
+
+        fig, axes = plt.subplots(3, 4, figsize=(12, 9))
+        fig.suptitle("Attention Maps from CLS Token (Last Layer)")
+        axes = axes.ravel()
+        for i in range(num_heads):
+            ax = axes[i]
+            ax.imshow(cls_attn[i].reshape(grid_size, grid_size), cmap='viridis')
+            ax.set_title(f'Head {i+1}')
+            ax.axis('off')
+        
+        plt.tight_layout()
+        if filepath:
+            plt.savefig(filepath, bbox_inches='tight')
+        plt.close()
     
     # ------------------- CROSS-VALIDATION VISUALIZATION METHODS ------------------- #
 
-    def create_cv_plots(self, model_wrapper : Base_Model, X_val, y_val, history, fold_dir, cnn_model=True, class_names=None, 
-                       create_xai_plots=True, create_embedding_plots=True, background_data=None, verbose = 0):
+    def create_cv_plots(self, model_wrapper, X_val, y_val, history, fold_dir,
+                        y_pred_prob = None, cnn_model=True, class_names=None, 
+                        create_xai_plots=True, create_embedding_plots=True, background_data=None, verbose = 0):
         """
         Create all visualization plots for a cross-validation fold and save to directory.
         
@@ -662,17 +772,20 @@ class Visualizer:
         - background_data: Background data for SHAP explanations
         """
         try:
-            # Get predictions
-            y_pred_prob = model_wrapper.predict(X_val)
+            y_true = np.argmax(y_val, axis=1) if len(y_val.shape) > 1 and y_val.shape[1] > 1 else y_val
+
+            if not y_pred_prob :
+                y_pred_prob = model_wrapper.predict(X_val)
             y_pred = np.argmax(y_pred_prob, axis=1)
-            y_true = np.argmax(y_val, axis=1) if len(y_val.shape) > 1 else y_val
             
             n_classes = y_pred_prob.shape[1] if len(y_pred_prob.shape) > 1 else 2
-            
-            # Create directory if it doesn't exist
             os.makedirs(fold_dir, exist_ok=True)
+            
+            self.logger.info("Using data subsets for memory-intensive XAI and embedding plots.")
+            xai_subset_size = 50
+            embedding_subset_size = 200
 
-
+            background_data = background_data if len(background_data) <= xai_subset_size else background_data[:xai_subset_size]
             
             # Basic plots for all models
             self.plot_confusion_matrix(
@@ -711,26 +824,28 @@ class Visualizer:
                     filepath=os.path.join(fold_dir, "cumulative_gain.png")
                 )
             
-            # Model-specific plots
-            if cnn_model:
-                self._create_cnn_specific_plots(model_wrapper, X_val, fold_dir)
-            else:
-                self._create_transformer_specific_plots(model_wrapper, X_val, fold_dir)
+            if isinstance(model_wrapper, (CNN_Model, tf.keras.Model)):
+                self.logger.info("Keras model detected. Creating CNN-specific plots.")
+                self._create_cnn_specific_plots_tf(model_wrapper, X_val, fold_dir)
+            elif isinstance(model_wrapper, PyTorch_Model):
+                self.logger.info("PyTorch model detected. Creating PyTorch-specific plots.")
+                # Pass the internal nn.Module for analysis
+                self._create_pytorch_specific_plots(model_wrapper.model, X_val, fold_dir)
             
             # XAI plots
             if create_xai_plots:
-                self._create_xai_plots(model_wrapper, X_val, fold_dir, background_data, class_names)
+                self._create_xai_plots(model_wrapper, X_val[:xai_subset_size], fold_dir, background_data, class_names)
             
             # Embedding plots
             # if create_embedding_plots:
-            #     self._create_embedding_plots(model_wrapper, X_val, y_true, fold_dir)
+                # self._create_embedding_plots(model_wrapper, X_val[:embedding_subset_size], y_true[:embedding_subset_size], fold_dir)
                 
             self.logger.info(f"All plots saved to {fold_dir}")
             
         except Exception as e:
             self.logger.error(f"Error creating cross-validation plots: {e}")
 
-    def _create_cnn_specific_plots(self, model_wrapper, X_val, fold_dir):
+    def _create_cnn_specific_plots_tf(self, model_wrapper, X_val, fold_dir):
         """Create CNN-specific visualization plots."""
         try:
             # Try to create Grad-CAM for a sample image
@@ -833,3 +948,27 @@ class Visualizer:
                     
         except Exception as e:
             self.logger.warning(f"Could not create embedding plots: {e}")
+
+    def _create_pytorch_specific_plots(self, pt_model, X_val, fold_dir):
+        """Create PyTorch-specific visualization plots (Grad-CAM, Attention)."""
+        try:
+            if len(X_val) > 0:
+                sample_image_np = X_val[0]
+                # Convert to PyTorch tensor format (NCHW)
+                sample_image_torch = torch.from_numpy(sample_image_np).float().permute(2, 0, 1).unsqueeze(0)
+                
+                # Check if it's a Transformer by looking for attention blocks
+                is_transformer = any("attn" in name for name, _ in pt_model.named_modules())
+                
+                if is_transformer:
+                    self.plot_attention_maps_pytorch(
+                        pt_model, sample_image_torch, 
+                        filepath=os.path.join(fold_dir, "attention_maps.png")
+                    )
+                else: # Assume it's a CNN
+                    self.plot_grad_cam_pytorch(
+                        pt_model, sample_image_torch, 
+                        filepath=os.path.join(fold_dir, "grad_cam.png")
+                    )
+        except Exception as e:
+            self.logger.warning(f"Could not create PyTorch-specific plots: {e}", exc_info=True)

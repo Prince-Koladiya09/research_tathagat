@@ -6,9 +6,12 @@ import os
 import traceback
 import keras
 import gc
+import sys
+import torch
 
 from cnn_base.Models import get_model, get_all_models
 from cnn_base.Models.base_model import Base_Model
+from cnn_base.Models.PyTorch.model import PyTorch_Model
 from cnn_base.utils import Visualizer
 from cnn_base.loggers import Logger
 from cnn_base.configs.base_config import Global_Config, RESULTS_DIR
@@ -79,7 +82,7 @@ class Cross_Validator:
     def run(self, 
             X: np.ndarray, 
             y: np.ndarray,
-            fine_tune_strategy: Callable[[Base_Model], None] = None,
+            fine_tune_strategy: Callable = None,
             fine_tune_layers: int = None,
             summary : bool = False,
             background_data: np.ndarray = None) -> pd.DataFrame:
@@ -91,6 +94,7 @@ class Cross_Validator:
         background_data = background_data or X[:min(100, len(X))]
 
         all_results = []
+        # temp_weights_path = os.path.join(model_dir, "_temp_weights.weights.h5")
 
         for model_name in self.model_names:
             self.logger.info(f"--- Validating model: {model_name} ---")
@@ -107,23 +111,34 @@ class Cross_Validator:
                 y_train, y_val = y[train_idx], y[val_idx]
 
                 model = None
+                cnn_model = None
                 try:
                     # Get model instance using get_model
                     self.logger.info(f"Initializing model {model_name} using get_model...")
-                    model : Base_Model = get_model(model_name)
+                    model = get_model(model_name)
 
-                    fine_tune_layers = fine_tune_layers or model.config.model.n_layers_to_tune
-                    fine_tune_strategy = fine_tune_strategy or cnn_fine_tune_strategy
-                    self.logger.info(f"Applying fine-tuning on {fine_tune_layers} layers...")
-                    model = fine_tune_strategy(model, fine_tune_layers)
+                    cnn_model = not isinstance(model, PyTorch_Model)
 
-                    if self.update_config_dict :
+                    # if isinstance(model, PyTorch_Model):
+                    #     # PyTorch models have their own fine-tuning methods
+                    #     model.freeze_all()
+                    #     if fine_tune_layers is not None and fine_tune_layers > 0:
+                    #         model.unfreeze_later_n(fine_tune_layers)
+                    #     model.compile()
+                    # else:
+                    #     # Use the strategy functions for Keras models
+                    #     current_strategy = fine_tune_strategy or get_fine_tune_strategy(model_name)
+                    #     if current_strategy :
+                    #         layers_to_tune = fine_tune_layers if fine_tune_layers is not None else model.config.model.n_layers_to_tune
+                    #         model = current_strategy(model, layers_to_tune)
+                    #         self.logger.info(f"Applying fine-tuning on {fine_tune_layers} layers...")
+                    
+                    if self.update_config_dict and hasattr(model, 'update_config'):
                         model.update_config(self.update_config_dict)
                     
                     if summary :
                         model.summary()
 
-                    # Train the model
                     self.logger.info(f"Starting training for {model.config.training.epochs} epochs...")
                     history = model.fit(
                         x=X_train,
@@ -132,14 +147,16 @@ class Cross_Validator:
                         verbose=0
                     )
                     
-                    # Evaluate the model
                     self.logger.info("Evaluating model...")
-                    eval_metrics = model.evaluate(
-                        X = X_val,
-                        y = y_val,
-                        verbose=0
-                        )
-                    
+                    eval_metrics = model.evaluate(X=X_val, y=y_val, verbose=0)
+                    y_pred_prob = model.predict(X_val)
+
+                    # if isinstance(model, PyTorch_Model):
+                    #     torch.save(model.model.state_dict(), temp_weights_path.replace('.h5', '.pth'))
+                    # else:
+                    #     model.save_weights(temp_weights_path)
+                    # self.logger.info(f"Saved temporary weights for fold {fold+1} to {temp_weights_path}")
+
                     if isinstance(eval_metrics, (list, tuple)):
                         # Get metric names from the compiled model
                         if hasattr(model, 'config') and hasattr(model.config.training, 'metrics'):
@@ -157,21 +174,41 @@ class Cross_Validator:
                     
                     self.logger.debug(f"Fold {fold + 1} metrics: {eval_metrics}")
                     self.logger.info(f"Fold {fold + 1} results: {metric_dict}")
+                    
+                # except Exception as e:
+                #     self.logger.error(f"Error in fold {fold + 1} for model {model_name}: {e}")
+                #     self.logger.error(traceback.format_exc())
+                #     continue
 
-                    self._create_fold_visualizations(model, X_val, y_val, history, model_name, fold + 1, background_data, model_dir)
+                # finally :
+                #     keras.backend.clear_session()
+                #     if "torch" in sys.modules :
+                #         torch.cuda.empty_cache()
+                #     gc.collect()
+                    
+                # try :
+                    self._create_fold_visualizations(model, X_val, y_val, y_pred_prob, history, model_name, fold + 1,
+                                                     cnn_model, background_data, model_dir)
                     
                 except Exception as e:
                     self.logger.error(f"Error in fold {fold + 1} for model {model_name}: {e}")
+                    # self.logger.error(f"Error during visualization for fold {fold + 1}: {e}", exc_info=True)
                     self.logger.error(traceback.format_exc())
                     continue
 
                 finally :
                     if model :
                         del model
-                    
                     keras.backend.clear_session()
+                    if "torch" in sys.modules :
+                        torch.cuda.empty_cache()
                     gc.collect()
                     self.logger.info(f"Cleaned up memory after fold {fold + 1}.")
+                    # pth_path = temp_weights_path.replace('.h5', '.pth')
+                    # if os.path.exists(temp_weights_path) :
+                    #     os.remove(temp_weights_path)
+                    # if os.path.exists(pth_path) :
+                    #     os.remove(pth_path)
 
             # Aggregate results for current model
             if fold_results:
@@ -189,7 +226,7 @@ class Cross_Validator:
         
         return self.results
     
-    def _create_fold_visualizations(self, model_wrapper, X_val, y_val, history, model_name, fold_num, background_data, graphs_dir):
+    def _create_fold_visualizations(self, model_wrapper, X_val, y_val, y_pred_prob, history, model_name, fold_num, cnn_model, background_data, graphs_dir):
         """
         Create visualization plots for a specific fold and save to appropriate directory.
         """
@@ -203,8 +240,10 @@ class Cross_Validator:
                 model_wrapper=model_wrapper,
                 X_val=X_val,
                 y_val=y_val,
+                y_pred_prob=y_pred_prob,
                 history=history,
                 fold_dir=fold_dir,
+                cnn_model=cnn_model,
                 class_names=self.class_names,
                 create_xai_plots=self.create_xai_plots,
                 create_embedding_plots=self.create_embedding_plots,
