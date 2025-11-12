@@ -24,9 +24,10 @@ class Base_Model(Keras_Model, ABC):
         self.logger.info(f"Model '{self.name}' initialized.")
         self.logger.debug(f"Initial config: {self.config.model_dump_json(indent=2)}")
     
-    def update_config(self, updates: dict) -> None:
+    def update_config(self, updates: list[dict]) -> None:
         model = self.config
-        self.update_attr(model, updates)
+        for update in updates :
+            self.update_attr(model, update)
         self.config = Global_Config.model_validate(model)
         Logger().info(f"Global config updated to: {self.config.model_dump_json(indent=2)}")
 
