@@ -7,7 +7,7 @@ from cnn_base.Models.Transformers.providers import _HUB_URLS as transformer_hub_
 from cnn_base.Models.PyTorch.model import PyTorch_Model
 import timm
 
-logger = Logger("Get_Model_Logger")
+logger = Logger("Get_Model_Logger", "get_model__info.log", "get_model__error.log")
 
 def get_all_models() -> tuple[list[str], list[str], list[str]]:
     """Returns a tuple of (cnn_models, transformer_models, pytorch_models)"""

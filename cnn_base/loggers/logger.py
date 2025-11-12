@@ -5,7 +5,7 @@ import re
 import time
 
 class Logger:
-    def __init__(self, name: str = "My_Lib_Logger", info_file: str = "training_info.log", error_file: str = "training_error.log", new_file : bool = True, timestamped_name : bool = True):
+    def __init__(self, name: str = "My_Lib_Logger", info_file: str = "training_info.log", error_file: str = "training_error.log", new_file : bool = True, timestamped_name : bool = False):
         self.logger = logging.getLogger(name)
         self.new_file = new_file
         self.timestamped_name = timestamped_name
